@@ -1,0 +1,840 @@
+---
+title: "Untitled"
+author: "Lancelot Ravier"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(modelsummary)
+library(glue)
+library(gt)
+library(car)
+library(dunn.test)
+library(rcompanion)
+library(rstatix)
+library(purrr)
+library(ggplot2)
+library(patchwork)
+library(psych)
+library(performance)
+library(lmtest)
+library(readxl)
+library(openxlsx)
+library(pheatmap)
+
+```
+
+```{r}
+data <- read.csv("data/data.csv")
+data <- data[ , -1]
+data <- data %>%
+  mutate(Altitude = case_when(
+    Ville_eval == "Cusco (3400m)" ~ "3400m",
+    Ville_eval == "Juliaca (3800m)" ~ "3800m",
+    Ville_eval == "La Rinconada (5100m-5300m)" ~ "5100m-5300m",
+    Ville_eval == "Lima (150m)" ~ "150m"
+  ))
+data <- data %>%
+  mutate(Ville_eval = case_when(
+    Ville_eval == "Cusco (3400m)" ~ "Cusco",
+    Ville_eval == "Juliaca (3800m)" ~ "Juliaca",
+    Ville_eval == "La Rinconada (5100m-5300m)" ~ "Rinconada",
+    Ville_eval == "Lima (150m)" ~ "Lima"
+  ))
+data$Sexe_F_Fille_G_Garçon = as.factor(data$Sexe_F_Fille_G_Garçon)
+data$Hb.mass.kg..g...kg.2 = as.numeric(data$Hb.mass.kg..g...kg.2)
+data$PV..kg..ml.kg. = as.numeric(data$PV..kg..ml.kg.)
+data$BV..kg..ml.kg. = as.numeric(data$BV..kg..ml.kg.)
+
+data_3ans <- data[data$Age_categorie_binaire == "0-3 ans", ]
+data_3ans <- data_3ans[ , -8]
+
+data_12ans <- data[data$Age_categorie_binaire == "8-12 ans", ]
+data_12ans <- data_12ans[ , -8]
+
+```
+
+```{r, echo=FALSE}
+# === Chargement et préparation ===
+variables_quant <- data_3ans %>%
+  select(where(~ is.numeric(.) && !all(is.na(.)))) %>%
+  names()
+
+variables_qual <- data_3ans %>%
+  select(where(~ is.character(.) || is.factor(.)) & where(~ !all(is.na(.)))) %>%
+  names()
+variables_qual <- variables_qual[-c(1, 3)]
+
+# === Résumé pour variables quantitatives ===
+quant_table <- data_3ans %>%
+  pivot_longer(cols = all_of(variables_quant), names_to = "variable", values_to = "valeur") %>%
+  group_by(variable, Ville_eval) %>%
+  summarise(
+    mean = mean(valeur, na.rm = TRUE),
+    median = median(valeur, na.rm = TRUE),
+    n = sum(!is.na(valeur)),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    summary_str = glue("{round(mean,1)} {round(median, 2)} {N = {n}}")
+  ) %>%
+  select(variable, Ville_eval, summary_str)
+
+# === Résumé pour variables qualitatives ===
+qual_table <- data_3ans %>%
+  pivot_longer(cols = all_of(variables_qual), names_to = "variable", values_to = "valeur") %>%
+  group_by(variable, Ville_eval, valeur) %>%
+  summarise(n_val = n(), .groups = "drop") %>%
+  group_by(variable, Ville_eval) %>%
+  mutate(
+    total = sum(n_val),
+    prop = round(100 * n_val / total, 1),
+    str = glue("{valeur} = {prop} %")
+  ) %>%
+  summarise(
+    summary_str = glue_collapse(str, sep = "\n") %>% paste0("\nN = ", unique(total)),
+    .groups = "drop"
+  )
+
+# === Fusion des deux tableaux ===
+summary_table <- bind_rows(quant_table, qual_table) %>%
+  pivot_wider(names_from = Ville_eval, values_from = summary_str)
+
+# === 2. Fonction pour récupérer les logos de signifiance ===
+get_signif_logo <- function(df, var, group = "Ville_eval") {
+  symbole_map <- setNames(c("C","J","L",""), sort(unique(data$Ville_eval)))
+
+  
+  df2 <- df %>% select(all_of(c(group, var))) %>% filter(!is.na(.data[[var]]))
+  villes_presentes <- sort(unique(df2[[group]]))
+  
+  if (length(villes_presentes) < 2) {
+    return(setNames(rep("", length(villes)), villes))
+  }
+
+  logos <- setNames(rep("", length(villes)), villes)
+
+  # ====== Cas quantitatif ======
+  if (is.numeric(df[[var]]) || is.integer(df[[var]])) {
+    df2[[var]] <- as.numeric(df2[[var]])
+    x <- df2[[var]]
+    g <- as.factor(df2[[group]])
+
+    # Vérif : effectif min par groupe
+    if (any(table(g) < 30)) {
+      test_type <- "kruskal"
+    } else {
+      
+      # Homogénéité des variances
+      variances_ok <- tryCatch({
+        leveneTest(x ~ g)$`Pr(>F)`[1] > 0.05
+      }, error = function(e) FALSE)
+
+      if (variances_ok) {
+        test_type <- "anova"
+      } else {
+        test_type <- "kruskal"
+      }
+    }
+
+    if (test_type == "anova") {
+      model <- aov(x ~ g)
+      pval <- summary(model)[[1]]$`Pr(>F)`[1]
+      if (pval > 0.05) return(logos)
+
+      posthoc <- tryCatch({
+        tukey <- TukeyHSD(model)
+        res <- as.data.frame(tukey[[1]])
+        res$comparison <- rownames(res)
+        res <- res %>%
+  mutate(group1 = sub("-.*", "", comparison),
+         group2 = sub(".*-", "", comparison),
+         p.adj = `p adj`)
+        res
+      }, error = function(e) NULL)
+
+    } else {
+      gtest <- tryCatch(kruskal_test(df2, as.formula(paste(var, "~", group))), error = function(e) NULL)
+      if (is.null(gtest) || gtest$p > 0.05) return(logos)
+      posthoc <- tryCatch(
+        dunn_test(df2, as.formula(paste(var, "~", group)), p.adjust.method = "BH"),
+        error = function(e) NULL
+      )
+    }
+
+  # ====== Cas qualitatif ======
+  } else {
+    df2[[var]] <- as.factor(df2[[var]])
+    gtest <- tryCatch(chisq_test(df2, as.formula(paste(var, "~", group))), error = function(e) NULL)
+    if (is.null(gtest) || gtest$p > 0.05) return(logos)
+    posthoc <- tryCatch(
+      pairwise_fisher_test(df2, as.formula(paste(var, "~", group)), p.adjust.method = "BH"),
+      error = function(e) NULL
+    )
+  }
+
+  if (is.null(posthoc)) return(logos)
+
+  # ===== Annotation des symboles =====
+  for (v in villes) {
+    comp <- posthoc %>%
+      filter((group1 == v | group2 == v) & p.adj < 0.05)
+
+    if (nrow(comp) > 0) {
+      symboles <- sapply(1:nrow(comp), function(i) {
+        autre <- if (comp$group1[i] == v) comp$group2[i] else comp$group1[i]
+        symbole_map[autre] %||% ""
+      })
+      logos[v] <- paste0(unique(symboles), collapse = "")
+    }
+  }
+
+  return(logos)
+}
+
+
+# === 3. Construction du tableau de logos pour toutes les variables ===
+# On crée d’abord une data.frame avec une colonne « variable » + une colonne de logo pour chaque ville
+villes <- sort(unique(data_3ans$Ville_eval))
+
+signif_df <- map_df(
+  c(variables_quant, variables_qual),
+  ~ {
+    logos <- get_signif_logo(data_3ans, .x)
+    logo_cols <- setNames(as.list(logos), paste0(names(logos), "_logo"))
+    tibble(variable = .x) %>% bind_cols(logo_cols)
+  }
+)
+
+# === 4. Fusion avec votre summary_table et ajout des logos ===
+# (on part du summary_table que vous avez déjà préparé)
+final_table <- summary_table %>%
+  left_join(signif_df, by = "variable")
+
+# Boucle explicite pour concaténer les logos aux colonnes par ville
+for (ville in villes) {
+  col_logo <- paste0(ville, "_logo")
+  if (col_logo %in% colnames(final_table)) {
+    final_table[[ville]] <- paste0(final_table[[ville]], " ", final_table[[col_logo]])
+  }
+}
+
+# Supprimer les colonnes *_logo
+final_table <- final_table %>%
+  select(-ends_with("_logo"))
+
+
+final_table %>%
+  arrange(variable) %>%
+  gt() %>%
+  tab_header(title = "Tableau récapitulatif par site") %>%
+  cols_label(variable = "Variable") %>%
+  opt_all_caps()
+```
+
+```{r}
+mod = aov(HB ~ Ville_eval, data = data_3ans)
+summary(mod)
+TukeyHSD(mod)
+```
+```{r}
+kruskal_test(HB ~ Ville_eval, data = data_3ans)
+dunn_test(HB ~ Ville_eval, data = data_3ans, p.adjust.method = "holm")
+```
+```{r}
+variables_quant <- data_12ans %>%
+  select(where(~ is.numeric(.) && !all(is.na(.)))) %>%
+  names()
+
+variables_qual <- data_12ans %>%
+  select(where(~ is.character(.) || is.factor(.)) & where(~ !all(is.na(.)))) %>%
+  names()
+variables_qual <- variables_qual[-c(1, 3)]
+
+# === Résumé pour variables quantitatives ===
+quant_table <- data_12ans %>%
+  pivot_longer(cols = all_of(variables_quant), names_to = "variable", values_to = "valeur") %>%
+  group_by(variable, Ville_eval) %>%
+  summarise(
+    mean = mean(valeur, na.rm = TRUE),
+    median = median(valeur, na.rm = TRUE),
+    n = sum(!is.na(valeur)),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    summary_str = glue("{round(mean,1)} {round(median, 2)} {N = {n}}")
+  ) %>%
+  select(variable, Ville_eval, summary_str)
+
+# === Résumé pour variables qualitatives ===
+qual_table <- data_12ans %>%
+  pivot_longer(cols = all_of(variables_qual), names_to = "variable", values_to = "valeur") %>%
+  group_by(variable, Ville_eval, valeur) %>%
+  summarise(n_val = n(), .groups = "drop") %>%
+  group_by(variable, Ville_eval) %>%
+  mutate(
+    total = sum(n_val),
+    prop = round(100 * n_val / total, 1),
+    str = glue("{valeur} = {prop} %")
+  ) %>%
+  summarise(
+    summary_str = glue_collapse(str, sep = "\n") %>% paste0("\nN = ", unique(total)),
+    .groups = "drop"
+  )
+
+# === Fusion des deux tableaux ===
+summary_table <- bind_rows(quant_table, qual_table) %>%
+  pivot_wider(names_from = Ville_eval, values_from = summary_str)
+
+
+# === 3. Construction du tableau de logos pour toutes les variables ===
+# On crée d’abord une data.frame avec une colonne « variable » + une colonne de logo pour chaque ville
+villes <- sort(unique(data_12ans$Ville_eval))
+
+signif_df <- map_df(
+  c(variables_quant, variables_qual),
+  ~ {
+    logos <- get_signif_logo(data_3ans, .x)
+    logo_cols <- setNames(as.list(logos), paste0(names(logos), "_logo"))
+    tibble(variable = .x) %>% bind_cols(logo_cols)
+  }
+)
+
+# === 4. Fusion avec votre summary_table et ajout des logos ===
+# (on part du summary_table que vous avez déjà préparé)
+final_table <- summary_table %>%
+  left_join(signif_df, by = "variable")
+
+# Boucle explicite pour concaténer les logos aux colonnes par ville
+for (ville in villes) {
+  col_logo <- paste0(ville, "_logo")
+  if (col_logo %in% colnames(final_table)) {
+    final_table[[ville]] <- paste0(final_table[[ville]], " ", final_table[[col_logo]])
+  }
+}
+
+# Supprimer les colonnes *_logo
+final_table <- final_table %>%
+  select(-ends_with("_logo"))
+
+
+final_table %>%
+  arrange(variable) %>%
+  gt() %>%
+  tab_header(title = "Tableau récapitulatif par site") %>%
+  cols_label(variable = "Variable") %>%
+  opt_all_caps()
+```
+
+```{r}
+par(mfrow = c(1, 2))
+f1 = ggplot(data_3ans, aes(x = Age_mois, fill = Ville_eval)) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Age-Ville 3ans",
+       x = "Valeurs",
+       y = "Densité") +
+  theme_minimal()
+
+f2 = ggplot(data_12ans, aes(x = Age_mois, fill = Ville_eval)) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Age-Ville 12ans",
+       x = "Valeurs",
+       y = "Densité") +
+  theme_minimal()
+
+f1 + f2
+```
+
+```{r}
+seuils <- data %>%
+  filter(!is.na(Categorie_age_OMS)) %>%
+  group_by(Ville_eval, Categorie_age_OMS) %>%
+  summarise(
+    seuil_q10 = quantile(HB, na.rm = TRUE, probs = 0.1),
+    seuil_q90 = quantile(HB, na.rm = TRUE, probs = 0.9),
+    seuil_q10_K = quantile(Hb.mass.kg..g...kg., na.rm = TRUE, probs = 0.1),
+    seuil_q90_K = quantile(Hb.mass.kg..g...kg., na.rm = TRUE, probs = 0.9),
+    .groups = "drop"
+  )
+
+data <- data %>%
+  left_join(seuils, by = c("Ville_eval", "Categorie_age_OMS")) %>%
+  mutate(
+    Anemie_Q10 = case_when(
+      HB < seuil_q10 ~ "oui",
+      HB >= seuil_q10 ~ "non",
+      TRUE ~ ""
+    ),
+    Polyglobulie_Q90 = case_when(
+      HB > seuil_q90 ~ "oui",
+      HB <= seuil_q90 ~ "non",
+      TRUE ~ ""
+    ),
+    Anemie_Q10_Hbmass = case_when(
+      Hb.mass.kg..g...kg. < seuil_q10_K ~ "oui",
+      Hb.mass.kg..g...kg. > seuil_q10_K ~ "non",
+      TRUE ~ ""
+    ),
+    Polyglobulie_Q90_Hbmass = case_when(
+      Hb.mass.kg..g...kg. > seuil_q90_K ~ "oui",
+      Hb.mass.kg..g...kg. <= seuil_q90_K ~ "non",
+      TRUE ~ ""
+    )
+  )
+```
+
+
+```{r}
+df_diag <- data %>%
+  left_join(seuils, by = c("Ville_eval", "Categorie_age_OMS")) %>%
+  mutate(
+    diagnostic_1SD = case_when(
+      HB < seuil_1SD_inf ~ "Anémie 1SD",
+      HB > seuil_1SD_sup ~ "Polyglobulie 1SD",
+      TRUE ~ ""
+    ),
+    diagnostic_2SD = case_when(
+      HB < seuil_2SD_inf ~ "Anémie 2SD",
+      HB > seuil_2SD_sup ~ "Polyglobulie 2SD",
+      TRUE ~ ""
+    ),
+    diagnostic_1SD_K = case_when(
+      Hb.mass.kg..g...kg. < seuil_1SD_inf_K ~ "Anémie 1SD",
+      Hb.mass.kg..g...kg. > seuil_1SD_sup_K ~ "Polyglobulie 1SD",
+      TRUE ~ ""
+    ),
+    diagnostic_2SD_K = case_when(
+      Hb.mass.kg..g...kg. < seuil_2SD_inf_K ~ "Anémie 2SD",
+      Hb.mass.kg..g...kg. > seuil_2SD_sup_K ~ "Polyglobulie 2SD",
+      TRUE ~ ""
+    ),
+    diagnostic_OMS2011 = case_when(
+      HB_corrigée_OMS2011 < 11 & Categorie_age_OMS == "6-23 mois"~ "Anémie OMS2011",
+      HB_corrigée_OMS2011 < 11 & Categorie_age_OMS == "24-59 mois"~ "Anémie OMS2011",
+      HB_corrigée_OMS2011 < 11.5 & Categorie_age_OMS == "5-11 ans"~ "Anémie OMS2011",
+      HB_corrigée_OMS2011 < 12 & Categorie_age_OMS == "12-14 ans"~ "Anémie OMS2011",
+      HB_corrigée_OMS2011 > 14.5 ~ "Polyglobulie OMS2011",
+      TRUE ~ ""
+    ),
+    diagnostic_OMS2024 = case_when(
+      HB_corrigée_OMS2024 < 10.5 & Categorie_age_OMS == "6-23 mois"~ "Anémie OMS2024",
+      HB_corrigée_OMS2024 < 11 & Categorie_age_OMS == "24-59 mois"~ "Anémie OMS2024",
+      HB_corrigée_OMS2024 < 11.5 & Categorie_age_OMS == "5-11 ans"~ "Anémie OMS2024",
+      HB_corrigée_OMS2024 < 12 & Categorie_age_OMS == "12-14 ans"~ "Anémie OMS2024",
+      HB_corrigée_OMS2024 > 14.5 ~ "Polyglobulie OMS2024",
+      TRUE ~ ""
+    )
+  )%>%
+  select(Code_Sujet, Ville_eval, Age_mois, Age_categorie_binaire, Categorie_age_OMS, HB, diagnostic_1SD, Anemie_SD, Polyglobulie_SD, diagnostic_2SD, Anemie_2SD, Polyglobulie_2SD, diagnostic_OMS2011, Anemie_OMS2011, Polyglobulie_14.5_OMS2011, diagnostic_OMS2024, Anemie_OMS2024, Polyglobulie_14.5_OMS2024, diagnostic_1SD_K, Anemie_SD_Hbmass_kg,Polyglobulie_SD_Hbmass_kg, diagnostic_2SD_K, Anemie_2SD_Hbmass_kg, Polyglobulie_2SD_Hbmass_kg)
+
+```
+
+```{r}
+data_3ans <- data[data$Age_categorie_binaire == "0-3 ans", ]
+data_3ans <- data_3ans[ , -8]
+
+data_12ans <- data[data$Age_categorie_binaire == "8-12 ans", ]
+data_12ans <- data_12ans[ , -8]
+```
+
+```{r}
+mod = lm(HB ~ Ville_eval + Age_mois + Sexe_F_Fille_G_Garçon + Poids, data = data_3ans)
+summary(mod)
+bptest(mod)
+shapiro.test(residuals(mod))
+anova = aov(HCT.. ~ Ville_eval, data = data_3ans)
+TukeyHSD(anova)
+```
+```{r}
+df = read.csv("data/nutri.csv")
+```
+
+```{r}
+df_3ans = df[df$Age_categorie_binaire == "0-3 ans",]
+df_12ans = df[df$Age_categorie_binaire == "8-12 ans",]
+```
+
+```{r}
+detect_outliers_iqr <- function(x) {
+  Q1 <- quantile(x, 0.25, na.rm = TRUE)
+  Q3 <- quantile(x, 0.75, na.rm = TRUE)
+  IQR_val <- Q3 - Q1
+  return(x < (Q1 - 1.5 * IQR_val) | x > (Q3 + 1.5 * IQR_val))
+}
+
+detect_outliers_iqra <- function(x, threshold = 2) {
+  mu <- mean(x, na.rm = TRUE)
+  sigma <- sd(x, na.rm = TRUE)
+  return(abs(x - mu) > threshold * sigma)
+}
+
+
+df_outliers_3ans <- sapply(df_3ans[, sapply(df_3ans, is.numeric)], detect_outliers_iqr)
+df_outliers_12ans <- sapply(df_12ans[, sapply(df_12ans, is.numeric)], detect_outliers_iqr)
+
+identifiants_3 <- df_3ans$Code_Sujet
+identifiants_12 <- df_12ans$Code_Sujet
+
+outlier_rows_3 <- apply(df_outliers_3ans, 1, any)  # TRUE si au moins un outlier sur la ligne
+outlier_rows_12 <- apply(df_outliers_12ans, 1, any)  # TRUE si au moins un outlier sur la ligne
+
+code_sujets_outliers_3 <- identifiants_3[df_outliers_3ans]
+code_sujets_outliers_12 <- identifiants_12[df_outliers_12ans]
+
+df_outliers_log_3 <- as.data.frame(df_outliers_3ans)
+df_outliers_log_3$code_sujet <- identifiants_3
+df_valeurs_3 <- df_3ans[, sapply(df_3ans, is.numeric)]
+df_valeurs_3$code_sujet <- identifiants_3
+
+df_outliers_log_12 <- as.data.frame(df_outliers_12ans)
+df_outliers_log_12$code_sujet <- identifiants_12
+df_valeurs_12 <- df_12ans[, sapply(df_12ans, is.numeric)]
+df_valeurs_12$code_sujet <- identifiants_12
+
+# Reshaper pour voir les variables en outlier par sujet
+outlier_long_3 <- df_outliers_log_3 %>%
+  tidyr::pivot_longer(-code_sujet, names_to = "variable", values_to = "is_outlier") %>%
+  filter(is_outlier) %>%
+  left_join(df_valeurs_3 %>%
+              tidyr::pivot_longer(-code_sujet, names_to = "variable", values_to = "valeur"),
+            by = c("code_sujet", "variable"))
+
+
+outlier_long_12 <- df_outliers_log_12 %>%
+  tidyr::pivot_longer(-code_sujet, names_to = "variable", values_to = "is_outlier") %>%
+  filter(is_outlier) %>%
+  left_join(df_valeurs_12 %>%
+              tidyr::pivot_longer(-code_sujet, names_to = "variable", values_to = "valeur"),
+            by = c("code_sujet", "variable"))
+
+
+```
+
+```{r}
+# Sous-groupes de référence
+ref_0_3 <- df %>% filter(Age_mois >= 24, Age_mois <= 36)
+ref_8_12 <- df %>% filter(Age_mois >= 120, Age_mois <= 132)
+
+# Sélection des colonnes numériques
+num_vars <- names(df)[sapply(df, is.numeric)]
+
+# Fonction pour retourner un data.frame avec Q1, Q3 pour un groupe
+get_iqr_bounds <- function(data, prefix, threshold = 2) {
+  stats <- lapply(num_vars, function(var) {
+    mu <- mean(data[[var]], na.rm = TRUE)
+    sigma <- sd(data[[var]], na.rm = TRUE)
+    data.frame(
+      variable = var,
+      mean = mu,
+      sd = sigma,
+      min_bound = mu - threshold * sigma,
+      max_bound = mu + threshold * sigma
+    )
+  })
+  do.call(rbind, stats) %>% mutate(groupe = prefix)
+}
+
+# Seuils IQR pour les deux groupes
+iqra_0_3 <- get_iqr_bounds(ref_0_3, "0-3 ans")
+iqra_8_12 <- get_iqr_bounds(ref_8_12, "8-12 ans")
+iqr_all <- bind_rows(iqra_0_3, iqra_8_12)
+
+
+
+df_long <- df %>%
+  select(Code_Sujet, Age_categorie_binaire, all_of(num_vars)) %>%
+  pivot_longer(cols = -c(Code_Sujet, Age_categorie_binaire, Age_mois), names_to = "variable", values_to = "valeur") %>%
+  left_join(iqr_all, by = c("Age_categorie_binaire" = "groupe", "variable")) %>%
+  mutate(
+    is_outlier = valeur < min_bound | valeur > max_bound
+  ) %>%
+  select(Code_Sujet, variable, valeur, is_outlier ,Age_categorie_binaire)
+
+df_long = df_long[df_long$is_outlier == "TRUE",]
+```
+
+
+```{r}
+# 1. Calcul des seuils par groupe de référence
+ref_0_3 <- df %>% filter(Age_mois >= 24, Age_mois <= 36)
+ref_8_12 <- df %>% filter(Age_mois >= 120, Age_mois <= 132)
+
+num_vars <- names(df)[sapply(df, is.numeric)]
+
+get_iqr_bounds <- function(data, prefix) {
+  bounds <- lapply(num_vars, function(var) {
+    Q1 <- quantile(data[[var]], 0.25, na.rm = TRUE)
+    Q3 <- quantile(data[[var]], 0.75, na.rm = TRUE)
+    IQR_val <- Q3 - Q1
+    data.frame(
+      variable = var,
+      Q1 = Q1,
+      Q3 = Q3,
+      IQR = IQR_val,
+      min_bound = Q1 - 1.5 * IQR_val,
+      max_bound = Q3 + 1.5 * IQR_val
+    )
+  })
+  do.call(rbind, bounds) %>% mutate(groupe = prefix)
+}
+
+iqr_0_3 <- get_iqr_bounds(ref_0_3, "0-3 ans")
+iqr_8_12 <- get_iqr_bounds(ref_8_12, "8-12 ans")
+iqr_all <- bind_rows(iqr_0_3, iqr_8_12)
+
+# 2. Application des bornes
+df_long <- df %>%
+  select(Code_Sujet, Age_categorie_binaire, Age_mois, all_of(num_vars)) %>%
+  pivot_longer(cols = -c(Code_Sujet, Age_categorie_binaire, Age_mois), 
+               names_to = "variable", values_to = "valeur") %>%
+  left_join(iqr_all, by = c("Age_categorie_binaire" = "groupe", "variable")) %>%
+  mutate(
+    is_outlier = valeur < min_bound | valeur > max_bound
+  ) %>%
+  filter(is_outlier) %>%
+  select(Code_Sujet, variable, valeur, min_bound, max_bound, is_outlier, Age_categorie_binaire)
+
+df_long =df_long[df_long$is_outlier == "TRUE",]
+```
+
+```{r}
+detect_outliers_zscore <- function(x, threshold = 2) {
+  z <- scale(x)[,1]
+  return(abs(z) > threshold)
+}
+
+# Étape 1 – Sélection des colonnes utiles
+num_vars <- df %>%
+  select(where(is.numeric)) %>%
+  names()
+
+# Étape 2 – Table longue avec valeurs
+df_long_valeurs <- df %>%
+  select(Code_Sujet, Age_categorie, all_of(num_vars)) %>%
+  pivot_longer(cols = -c(Code_Sujet, Age_categorie),
+               names_to = "variable", values_to = "valeur")
+
+# Étape 3 – Table longue avec indicateurs d'outlier
+df_long_outliers <- df %>%
+  select(Code_Sujet, Age_categorie, all_of(num_vars)) %>%
+  mutate(across(all_of(num_vars), ~ detect_outliers_zscore(.))) %>%
+  pivot_longer(cols = -c(Code_Sujet, Age_categorie),
+               names_to = "variable", values_to = "is_outlier")
+
+# Étape 4 – Fusion
+df_outliers_final <- df_long_valeurs %>%
+  left_join(df_long_outliers, by = c("Code_Sujet", "Age_categorie", "variable"))
+
+df_outliers_final = df_outliers_final[df_outliers_final$is_outlier == "TRUE",]
+```
+
+```{r}
+df_outliers_final <- df_outliers_final %>%
+  filter(!grepl("RNP", variable))
+```
+
+```{r}
+data_prevalence <- data %>%
+  select(Code_Sujet, Ville_eval, Age_categorie_binaire, Anemie_OMS2011, Anemie_OMS2024, Anemie_SD, Anemie_2SD, Anemie_Q10, Anemie_2SD_Hbmass_kg, Anemie_Q10_Hbmass, Polyglobulie_14.5_OMS2011, Polyglobulie_14.5_OMS2024, Polyglobulie_SD, Polyglobulie_2SD, Polyglobulie_Q90, Polyglobulie_SD_Hbmass_kg, Polyglobulie_2SD_Hbmass_kg, Polyglobulie_Q90_Hbmass)
+
+data_long <- data %>%
+  select(Ville_eval, starts_with("Anemie"), starts_with("Polyglobulie"), Age_categorie_binaire) %>%
+  pivot_longer(
+    cols = -c(Ville_eval, Age_categorie_binaire),
+    names_to = "Méthode",
+    values_to = "Résultat"
+  )
+
+data_long <- data_long %>%
+  mutate(
+    Type = case_when(
+      grepl("Anemie", Méthode) ~ "Anémie",
+      grepl("Polyglobulie", Méthode) ~ "Polyglobulie"
+    )
+  )
+
+prevalence <- data_long %>%
+  group_by(Ville_eval, Age_categorie_binaire, Méthode, Type) %>%
+  summarise(
+    Prevalence = mean(Résultat == "oui", na.rm = TRUE) * 100,
+    .groups = "drop"
+  )
+```
+
+```{r}
+library(ggplot2)
+prevalence_3 = prevalence[prevalence$Age_categorie_binaire == "0-3 ans",]
+prevalence_3 <- prevalence_3[!grepl("Hbmass", prevalence_3$Méthode), ]
+prevalence_3_anemie <- prevalence_3[!grepl("Polyglobulie", prevalence_3$Méthode), ]
+prevalence_3_poly <- prevalence_3[!grepl("Anemie", prevalence_3$Méthode), ]
+prevalence_12 = prevalence[prevalence$Age_categorie_binaire == "8-12 ans",]
+prevalence_12_anemie <- prevalence_12[!grepl("Polyglobulie", prevalence_12$Méthode), ]
+prevalence_12_poly <- prevalence_12[!grepl("Anemie", prevalence_12$Méthode), ]
+
+f1 = ggplot(prevalence_3_anemie, aes(x = Méthode, y = Prevalence, fill = Ville_eval)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  labs(
+    title = "Prévalence de l’anémie et de la polyglobulie par méthode et par ville",
+    x = "Méthode",
+    y = "Prévalence (%)",
+    fill = "Ville"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(face = "bold")
+  )
+
+f2 = ggplot(prevalence_12_anemie, aes(x = Méthode, y = Prevalence, fill = Ville_eval)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  labs(
+    title = "Prévalence de l’anémie et de la polyglobulie par méthode et par ville",
+    x = "Méthode",
+    y = "Prévalence (%)",
+    fill = "Ville"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(face = "bold")
+  )
+
+f1 + f2
+```
+```{r}
+
+
+f1 = ggplot(prevalence_3_poly, aes(x = Méthode, y = Prevalence, fill = Ville_eval)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  labs(
+    title = "Prévalence de l’anémie et de la polyglobulie par méthode et par ville",
+    x = "Méthode",
+    y = "Prévalence (%)",
+    fill = "Ville"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(face = "bold")
+  )
+
+f2 = ggplot(prevalence_12_poly, aes(x = Méthode, y = Prevalence, fill = Ville_eval)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  labs(
+    title = "Prévalence de l’anémie et de la polyglobulie par méthode et par ville",
+    x = "Méthode",
+    y = "Prévalence (%)",
+    fill = "Ville"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(face = "bold")
+  )
+
+f1 + f2
+```
+```{r}
+data_long_3_anemie = data_long[data_long$Age_categorie_binaire == "0-3 ans",]
+data_long_3_anemie <- data_long_3_anemie[!grepl("Polyglobulie", data_long_3_anemie$Méthode), ]
+data_long_3_anemie <- data_long_3_anemie[!grepl("Hbmass", data_long_3_anemie$Méthode), ]
+
+data_long_3_poly = data_long[data_long$Age_categorie_binaire == "0-3 ans",]
+data_long_3_poly <- data_long_3_poly[!grepl("Anemie", data_long_3_poly$Méthode), ]
+data_long_3_poly <- data_long_3_poly[!grepl("Hbmass", data_long_3_poly$Méthode), ]
+
+data_long_12_anemie = data_long[data_long$Age_categorie_binaire == "8-12 ans",]
+data_long_12_anemie <- data_long_12_anemie[!grepl("Polyglobulie", data_long_12_anemie$Méthode), ]
+
+data_long_12_poly = data_long[data_long$Age_categorie_binaire == "8-12 ans",]
+data_long_12_poly <- data_long_12_poly[!grepl("Anemie", data_long_12_poly$Méthode), ]
+
+prevalence_globale_3_anemie <- data_long_3_anemie %>%
+  group_by(Type, Méthode) %>%
+  summarise(
+    Prevalence = mean(Résultat == "oui", na.rm = TRUE) * 100,
+    .groups = "drop"
+  )
+
+prevalence_globale_3_poly <- data_long_3_poly %>%
+  group_by(Type, Méthode) %>%
+  summarise(
+    Prevalence = mean(Résultat == "oui", na.rm = TRUE) * 100,
+    .groups = "drop"
+  )
+
+prevalence_globale_12_anemie <- data_long_12_anemie %>%
+  group_by(Type, Méthode) %>%
+  summarise(
+    Prevalence = mean(Résultat == "oui", na.rm = TRUE) * 100,
+    .groups = "drop"
+  )
+
+prevalence_globale_12_poly <- data_long_12_poly %>%
+  group_by(Type, Méthode) %>%
+  summarise(
+    Prevalence = mean(Résultat == "oui", na.rm = TRUE) * 100,
+    .groups = "drop"
+  )
+```
+
+```{r}
+df_expanded <- data_long_3_anemie %>% 
+  select(Méthode, Résultat) %>%
+  filter(Résultat != "")
+
+res <- df_expanded %>%
+  pairwise_fisher_test(
+    Résultat ~ Méthode,
+    p.adjust.method = "holm"
+  )
+```
+
+```{r}
+library(dplyr)
+library(rstatix)
+library(stringr)
+
+# Étape 1 : Nettoyer les lignes vides ou NA
+df_expanded_3a <- data_long_3_anemie %>%
+  select(Méthode, Résultat) %>%
+  filter(!is.na(Résultat) & str_trim(Résultat) != "")
+
+df_expanded_3p <- data_long_3_poly %>%
+  select(Méthode, Résultat) %>%
+  filter(!is.na(Résultat) & str_trim(Résultat) != "")
+
+df_expanded_12a <- data_long_12_anemie %>%
+  select(Méthode, Résultat) %>%
+  filter(!is.na(Résultat) & str_trim(Résultat) != "")
+
+df_expanded_12p <- data_long_12_poly %>%
+  select(Méthode, Résultat) %>%
+  filter(!is.na(Résultat) & str_trim(Résultat) != "")
+```
+
+```{r}
+pairwise_fisher_test(table(df_expanded_3a), p.adjust.method = "holm")
+pairwise_fisher_test(table(df_expanded_3p), p.adjust.method = "holm")
+pairwise_fisher_test(table(df_expanded_12a), p.adjust.method = "holm")
+pairwise_fisher_test(table(df_expanded_12p), p.adjust.method = "holm")
+```
+
+```{r}
+cohen1 <- cohen.kappa(data_3ans[,c("Anemie_OMS2011", "Anemie_OMS2024", "Anemie_SD", "Anemie_2SD", "Anemie_Q10")])
+cohen2 <- cohen.kappa(data_3ans[,c("Polyglobulie_14.5_OMS2011", "Polyglobulie_14.5_OMS2024", "Polyglobulie_SD", "Polyglobulie_2SD", "Polyglobulie_Q90")])
+cohen3 <- cohen.kappa(data_12ans[,c("Anemie_OMS2011", "Anemie_OMS2024", "Anemie_SD", "Anemie_2SD", "Anemie_Q10", "Anemie_SD_Hbmass_kg", "Anemie_2SD_Hbmass_kg", "Anemie_Q10_Hbmass")])
+cohen4 <- cohen.kappa(data_12ans[,c("Polyglobulie_14.5_OMS2011", "Polyglobulie_14.5_OMS2024", "Polyglobulie_SD", "Polyglobulie_2SD", "Polyglobulie_Q90", "Polyglobulie_SD_Hbmass_kg", "Polyglobulie_2SD_Hbmass_kg", "Polyglobulie_Q90_Hbmass")])
+```
+
+```{r}
+pheatmap(cohen1$cohen.kappa, display_numbers = T)
+```
+
