@@ -1,0 +1,88 @@
+```{r}
+library(dplyr)
+library(tidyr)
+library(modelsummary)
+library(glue)
+library(gt)
+library(car)
+library(dunn.test)
+library(rcompanion)
+library(rstatix)
+library(purrr)
+library(ggplot2)
+library(patchwork)
+library(psych)
+library(performance)
+library(lmtest)
+library(readxl)
+library(openxlsx)
+library(pheatmap)
+```
+
+```{r}
+data = read.csv("data/datafinal.csv")
+```
+
+```{r}
+ggplot(data = data, aes(x = Hb.mass.kg..g...kg., y = HB, color = Altitude)) +
+  geom_point()
+```
+
+```{r}
+mod = lm(HB ~ Hb.mass.kg..g...kg. + Altitude + Hb.mass.kg..g...kg. * Altitude, data = data)
+summary(mod)
+check_heteroskedasticity(mod)
+check_normality(mod)
+check_autocorrelation(mod)
+check_outliers(mod)
+```
+
+```{r}
+df_moyennes <- data %>%
+  group_by(Altitude) %>%
+  summarise(
+    HB = mean(HB, na.rm = TRUE),
+    Hbmass = mean(Hb.mass.kg..g...kg., na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  tidyr::pivot_longer(cols = c(HB, Hbmass), names_to = "Mesure", values_to = "Valeur")
+
+ggplot(df_moyennes, aes(x = Altitude, y = Valeur, color = Mesure, group = Mesure)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 2) +
+  labs(title = "Évolution de HB et Hbmass selon l'altitude", y = "Valeur moyenne")
+```
+
+```{r}
+cor(data$HB, data$Hb.mass.kg..g...kg., method = "spearman", use = "complete.obs")
+mod = lm(HB ~ Hb.mass.kg..g...kg., data = data)
+summary(mod)
+check_heteroskedasticity(mod)
+check_normality(mod)
+check_autocorrelation(mod)
+check_outliers(mod)
+```
+```{r}
+data$rank_HB <- rank(data$HB)
+data$rank_HBMASS <- rank(data$Hb.mass.kg..g...kg.)
+
+ggplot(data, aes(x = rank_HBMASS, y = rank_HB)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  labs(title = "Comparaison des rangs HB vs HBMASS")
+```
+```{r}
+ggplot(data, aes(x = Hb.mass.kg..g...kg., y = HB)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(title = "Relation entre HB et HBMASS")
+```
+
+```{r}
+data$ecart <- data$rank_HB - data$rank_HBMASS
+
+ggplot(data, aes(x = ecart)) +
+  geom_histogram(bins = 50) +
+  labs(title = "Distribution des écarts de rang HB - HBMASS")
+```
+

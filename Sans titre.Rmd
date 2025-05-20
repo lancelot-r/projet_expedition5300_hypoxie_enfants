@@ -28,7 +28,6 @@ library(lmtest)
 library(readxl)
 library(openxlsx)
 library(pheatmap)
-
 ```
 
 ```{r}
@@ -52,14 +51,41 @@ data$Sexe_F_Fille_G_Garçon = as.factor(data$Sexe_F_Fille_G_Garçon)
 data$Hb.mass.kg..g...kg.2 = as.numeric(data$Hb.mass.kg..g...kg.2)
 data$PV..kg..ml.kg. = as.numeric(data$PV..kg..ml.kg.)
 data$BV..kg..ml.kg. = as.numeric(data$BV..kg..ml.kg.)
-
 data_3ans <- data[data$Age_categorie_binaire == "0-3 ans", ]
 data_3ans <- data_3ans[ , -8]
 
 data_12ans <- data[data$Age_categorie_binaire == "8-12 ans", ]
 data_12ans <- data_12ans[ , -8]
 
+data <- data %>%
+  mutate(Anemie_OMS2011 = na_if(Anemie_OMS2011, ""),
+         Anemie_OMS2024 = na_if(Anemie_OMS2024, ""),
+         Anemie_SD = na_if(Anemie_SD, ""),
+         Anemie_2SD = na_if(Anemie_2SD, ""),
+         Anemie_SD_Hbmass_kg = na_if(Anemie_SD_Hbmass_kg, ""),
+         Anemie_2SD_Hbmass_kg = na_if(Anemie_2SD_Hbmass_kg, ""),
+         Anemie_Q10 = na_if(Anemie_Q10, ""),
+         Anemie_Q10_Hbmass = na_if(Anemie_Q10_Hbmass, ""),
+         Polyglobulie_14.5_OMS2011 = na_if(Polyglobulie_14.5_OMS2011, ""),
+         Polyglobulie_14.5_OMS2024 = na_if(Polyglobulie_14.5_OMS2024, ""),
+         Polyglobulie_SD = na_if(Polyglobulie_SD, ""),
+         Polyglobulie_2SD = na_if(Polyglobulie_2SD, ""),
+         Polyglobulie_SD_Hbmass_kg = na_if(Polyglobulie_SD_Hbmass_kg, ""),
+         Polyglobulie_2SD_Hbmass_kg = na_if(Polyglobulie_2SD_Hbmass_kg, ""),
+         Polyglobulie_Q90 = na_if(Polyglobulie_Q90, ""),
+         Polyglobulie_Q90_Hbmass = na_if(Polyglobulie_Q90_Hbmass, "")
+         )
 ```
+
+```{r}
+data = read.csv("data/datafinal.csv")
+data_3ans <- data[data$Age_categorie_binaire == "0-3 ans", ]
+data_3ans <- data_3ans[ , -8]
+
+data_12ans <- data[data$Age_categorie_binaire == "8-12 ans", ]
+data_12ans <- data_12ans[ , -8]
+```
+
 
 ```{r, echo=FALSE}
 # === Chargement et préparation ===
@@ -107,73 +133,86 @@ qual_table <- data_3ans %>%
 summary_table <- bind_rows(quant_table, qual_table) %>%
   pivot_wider(names_from = Ville_eval, values_from = summary_str)
 
-# === 2. Fonction pour récupérer les logos de signifiance ===
-get_signif_logo <- function(df, var, group = "Ville_eval") {
-  symbole_map <- setNames(c("C","J","L",""), sort(unique(data$Ville_eval)))
-
+get_global_pvals <- function(df, vars, group = "Ville_eval") {
+  pvals <- sapply(vars, function(var) {
+    df2 <- df %>% select(all_of(c(group, var))) %>% filter(!is.na(.data[[var]]))
+    if (length(unique(df2[[group]])) < 2) return(1)
+    
+    if (is.numeric(df2[[var]]) || is.integer(df2[[var]])) {
+      g <- as.factor(df2[[group]])
+      x <- as.numeric(df2[[var]])
+      if (any(table(g) < 30)) {
+        p <- tryCatch(kruskal_test(df2, as.formula(paste(var, "~", group)))$p, error = function(e) 1)
+      } else {
+        variances_ok <- tryCatch(leveneTest(x ~ g)$`Pr(>F)`[1] > 0.05, error = function(e) FALSE)
+        if (variances_ok) {
+          model <- tryCatch(aov(x ~ g), error = function(e) NULL)
+          p <- if (!is.null(model)) summary(model)[[1]]$`Pr(>F)`[1] else 1
+        } else {
+          p <- tryCatch(kruskal_test(df2, as.formula(paste(var, "~", group)))$p, error = function(e) 1)
+        }
+      }
+    } else {
+      p <- tryCatch(chisq_test(df2, as.formula(paste(var, "~", group)))$p, error = function(e) 1)
+    }
+    return(p)
+  })
   
+  # Correction globale des p-valeurs
+  pvals_corr <- p.adjust(pvals, method = "BH")
+  names(pvals_corr) <- vars
+  return(pvals_corr)
+}
+
+# === 2. Fonction pour récupérer les logos de signifiance ===
+get_signif_logo <- function(df, var, group = "Ville_eval", pvals_globales = NULL) {
+  symbole_map <- setNames(c("C","J","L",""), sort(unique(df[[group]])))
+  villes <- sort(unique(df[[group]]))
   df2 <- df %>% select(all_of(c(group, var))) %>% filter(!is.na(.data[[var]]))
   villes_presentes <- sort(unique(df2[[group]]))
   
-  if (length(villes_presentes) < 2) {
-    return(setNames(rep("", length(villes)), villes))
-  }
-
+  if (length(villes_presentes) < 2) return(setNames(rep("", length(villes)), villes))
   logos <- setNames(rep("", length(villes)), villes)
 
-  # ====== Cas quantitatif ======
+  if (!is.null(pvals_globales) && (!var %in% names(pvals_globales) || pvals_globales[[var]] > 0.05)) {
+    return(logos)
+  }
+
+  # Suite identique à ta version actuelle...
   if (is.numeric(df[[var]]) || is.integer(df[[var]])) {
     df2[[var]] <- as.numeric(df2[[var]])
     x <- df2[[var]]
     g <- as.factor(df2[[group]])
 
-    # Vérif : effectif min par groupe
     if (any(table(g) < 30)) {
       test_type <- "kruskal"
     } else {
-      
-      # Homogénéité des variances
       variances_ok <- tryCatch({
         leveneTest(x ~ g)$`Pr(>F)`[1] > 0.05
       }, error = function(e) FALSE)
-
-      if (variances_ok) {
-        test_type <- "anova"
-      } else {
-        test_type <- "kruskal"
-      }
+      test_type <- if (variances_ok) "anova" else "kruskal"
     }
 
     if (test_type == "anova") {
       model <- aov(x ~ g)
-      pval <- summary(model)[[1]]$`Pr(>F)`[1]
-      if (pval > 0.05) return(logos)
-
       posthoc <- tryCatch({
         tukey <- TukeyHSD(model)
         res <- as.data.frame(tukey[[1]])
         res$comparison <- rownames(res)
         res <- res %>%
-  mutate(group1 = sub("-.*", "", comparison),
-         group2 = sub(".*-", "", comparison),
-         p.adj = `p adj`)
+          mutate(group1 = sub("-.*", "", comparison),
+                 group2 = sub(".*-", "", comparison),
+                 p.adj = `p adj`)
         res
       }, error = function(e) NULL)
-
     } else {
-      gtest <- tryCatch(kruskal_test(df2, as.formula(paste(var, "~", group))), error = function(e) NULL)
-      if (is.null(gtest) || gtest$p > 0.05) return(logos)
       posthoc <- tryCatch(
         dunn_test(df2, as.formula(paste(var, "~", group)), p.adjust.method = "BH"),
         error = function(e) NULL
       )
     }
-
-  # ====== Cas qualitatif ======
   } else {
     df2[[var]] <- as.factor(df2[[var]])
-    gtest <- tryCatch(chisq_test(df2, as.formula(paste(var, "~", group))), error = function(e) NULL)
-    if (is.null(gtest) || gtest$p > 0.05) return(logos)
     posthoc <- tryCatch(
       pairwise_fisher_test(df2, as.formula(paste(var, "~", group)), p.adjust.method = "BH"),
       error = function(e) NULL
@@ -182,11 +221,9 @@ get_signif_logo <- function(df, var, group = "Ville_eval") {
 
   if (is.null(posthoc)) return(logos)
 
-  # ===== Annotation des symboles =====
   for (v in villes) {
     comp <- posthoc %>%
       filter((group1 == v | group2 == v) & p.adj < 0.05)
-
     if (nrow(comp) > 0) {
       symboles <- sapply(1:nrow(comp), function(i) {
         autre <- if (comp$group1[i] == v) comp$group2[i] else comp$group1[i]
@@ -198,6 +235,7 @@ get_signif_logo <- function(df, var, group = "Ville_eval") {
 
   return(logos)
 }
+
 
 
 # === 3. Construction du tableau de logos pour toutes les variables ===
@@ -388,52 +426,6 @@ data <- data %>%
       TRUE ~ ""
     )
   )
-```
-
-
-```{r}
-df_diag <- data %>%
-  left_join(seuils, by = c("Ville_eval", "Categorie_age_OMS")) %>%
-  mutate(
-    diagnostic_1SD = case_when(
-      HB < seuil_1SD_inf ~ "Anémie 1SD",
-      HB > seuil_1SD_sup ~ "Polyglobulie 1SD",
-      TRUE ~ ""
-    ),
-    diagnostic_2SD = case_when(
-      HB < seuil_2SD_inf ~ "Anémie 2SD",
-      HB > seuil_2SD_sup ~ "Polyglobulie 2SD",
-      TRUE ~ ""
-    ),
-    diagnostic_1SD_K = case_when(
-      Hb.mass.kg..g...kg. < seuil_1SD_inf_K ~ "Anémie 1SD",
-      Hb.mass.kg..g...kg. > seuil_1SD_sup_K ~ "Polyglobulie 1SD",
-      TRUE ~ ""
-    ),
-    diagnostic_2SD_K = case_when(
-      Hb.mass.kg..g...kg. < seuil_2SD_inf_K ~ "Anémie 2SD",
-      Hb.mass.kg..g...kg. > seuil_2SD_sup_K ~ "Polyglobulie 2SD",
-      TRUE ~ ""
-    ),
-    diagnostic_OMS2011 = case_when(
-      HB_corrigée_OMS2011 < 11 & Categorie_age_OMS == "6-23 mois"~ "Anémie OMS2011",
-      HB_corrigée_OMS2011 < 11 & Categorie_age_OMS == "24-59 mois"~ "Anémie OMS2011",
-      HB_corrigée_OMS2011 < 11.5 & Categorie_age_OMS == "5-11 ans"~ "Anémie OMS2011",
-      HB_corrigée_OMS2011 < 12 & Categorie_age_OMS == "12-14 ans"~ "Anémie OMS2011",
-      HB_corrigée_OMS2011 > 14.5 ~ "Polyglobulie OMS2011",
-      TRUE ~ ""
-    ),
-    diagnostic_OMS2024 = case_when(
-      HB_corrigée_OMS2024 < 10.5 & Categorie_age_OMS == "6-23 mois"~ "Anémie OMS2024",
-      HB_corrigée_OMS2024 < 11 & Categorie_age_OMS == "24-59 mois"~ "Anémie OMS2024",
-      HB_corrigée_OMS2024 < 11.5 & Categorie_age_OMS == "5-11 ans"~ "Anémie OMS2024",
-      HB_corrigée_OMS2024 < 12 & Categorie_age_OMS == "12-14 ans"~ "Anémie OMS2024",
-      HB_corrigée_OMS2024 > 14.5 ~ "Polyglobulie OMS2024",
-      TRUE ~ ""
-    )
-  )%>%
-  select(Code_Sujet, Ville_eval, Age_mois, Age_categorie_binaire, Categorie_age_OMS, HB, diagnostic_1SD, Anemie_SD, Polyglobulie_SD, diagnostic_2SD, Anemie_2SD, Polyglobulie_2SD, diagnostic_OMS2011, Anemie_OMS2011, Polyglobulie_14.5_OMS2011, diagnostic_OMS2024, Anemie_OMS2024, Polyglobulie_14.5_OMS2024, diagnostic_1SD_K, Anemie_SD_Hbmass_kg,Polyglobulie_SD_Hbmass_kg, diagnostic_2SD_K, Anemie_2SD_Hbmass_kg, Polyglobulie_2SD_Hbmass_kg)
-
 ```
 
 ```{r}
@@ -836,5 +828,20 @@ cohen4 <- cohen.kappa(data_12ans[,c("Polyglobulie_14.5_OMS2011", "Polyglobulie_1
 
 ```{r}
 pheatmap(cohen1$cohen.kappa, display_numbers = T)
+```
+
+```{r}
+tableomsq10a3 = table(data_3ans$Anemie_OMS2024, data_3ans$Anemie_Q10)
+tableomsq10a12 = table(data_12ans$Anemie_OMS2024, data_12ans$Anemie_Q10)
+tableomsq10p3 = table(data_3ans$Polyglobulie_14.5_OMS2024, data_3ans$Polyglobulie_Q90)
+tableomsq10p12 = table(data_12ans$Polyglobulie_14.5_OMS2024, data_12ans$Polyglobulie_Q90)
+tableomsq10p12hb = table(data_12ans$Polyglobulie_14.5_OMS2024, data_12ans$Polyglobulie_Q90_Hbmass)
+```
+
+```{r}
+chisq.test(data_3ans$Anemie_Q10, data_3ans$Ville_eval)
+chisq.test(data_12ans$Anemie_Q10, data_12ans$Ville_eval)
+chisq.test(data_3ans$Polyglobulie_Q90, data_3ans$Ville_eval)
+chisq.test(data_12ans$Polyglobulie_Q90, data_12ans$Ville_eval)
 ```
 
