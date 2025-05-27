@@ -56,25 +56,6 @@ data_3ans <- data_3ans[ , -8]
 
 data_12ans <- data[data$Age_categorie_binaire == "8-12 ans", ]
 data_12ans <- data_12ans[ , -8]
-
-data <- data %>%
-  mutate(Anemie_OMS2011 = na_if(Anemie_OMS2011, ""),
-         Anemie_OMS2024 = na_if(Anemie_OMS2024, ""),
-         Anemie_SD = na_if(Anemie_SD, ""),
-         Anemie_2SD = na_if(Anemie_2SD, ""),
-         Anemie_SD_Hbmass_kg = na_if(Anemie_SD_Hbmass_kg, ""),
-         Anemie_2SD_Hbmass_kg = na_if(Anemie_2SD_Hbmass_kg, ""),
-         Anemie_Q10 = na_if(Anemie_Q10, ""),
-         Anemie_Q10_Hbmass = na_if(Anemie_Q10_Hbmass, ""),
-         Polyglobulie_14.5_OMS2011 = na_if(Polyglobulie_14.5_OMS2011, ""),
-         Polyglobulie_14.5_OMS2024 = na_if(Polyglobulie_14.5_OMS2024, ""),
-         Polyglobulie_SD = na_if(Polyglobulie_SD, ""),
-         Polyglobulie_2SD = na_if(Polyglobulie_2SD, ""),
-         Polyglobulie_SD_Hbmass_kg = na_if(Polyglobulie_SD_Hbmass_kg, ""),
-         Polyglobulie_2SD_Hbmass_kg = na_if(Polyglobulie_2SD_Hbmass_kg, ""),
-         Polyglobulie_Q90 = na_if(Polyglobulie_Q90, ""),
-         Polyglobulie_Q90_Hbmass = na_if(Polyglobulie_Q90_Hbmass, "")
-         )
 ```
 
 ```{r}
@@ -843,5 +824,10 @@ chisq.test(data_3ans$Anemie_Q10, data_3ans$Ville_eval)
 chisq.test(data_12ans$Anemie_Q10, data_12ans$Ville_eval)
 chisq.test(data_3ans$Polyglobulie_Q90, data_3ans$Ville_eval)
 chisq.test(data_12ans$Polyglobulie_Q90, data_12ans$Ville_eval)
+```
+
+```{r}
+data <- data %>%
+  select(Code_Sujet, Ville_eval, Age_categorie_binaire, Age_mois, Anemie_OMS2011, Anemie_OMS2024, Anemie_SD, Anemie_2SD, Anemie_Q10, Anemie_2SD_Hbmass_kg, Anemie_Q10_Hbmass, Polyglobulie_14.5_OMS2011, Polyglobulie_14.5_OMS2024, Polyglobulie_SD, Polyglobulie_2SD, Polyglobulie_Q90, Polyglobulie_SD_Hbmass_kg, Polyglobulie_2SD_Hbmass_kg, Polyglobulie_Q90_Hbmass)
 ```
 

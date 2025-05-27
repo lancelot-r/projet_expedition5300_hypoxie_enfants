@@ -1,3 +1,8 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
 ```{r}
 library(dplyr)
 library(tidyr)
@@ -17,6 +22,8 @@ library(lmtest)
 library(readxl)
 library(openxlsx)
 library(pheatmap)
+library(sjPlot)
+library(stats)
 ```
 
 ```{r}
@@ -43,9 +50,10 @@ df_moyennes <- data %>%
   summarise(
     HB = mean(HB, na.rm = TRUE),
     Hbmass = mean(Hb.mass.kg..g...kg., na.rm = TRUE),
+    PV = mean(PV..kg..ml.kg., na.rm = TRUE),
     .groups = "drop"
   ) %>%
-  tidyr::pivot_longer(cols = c(HB, Hbmass), names_to = "Mesure", values_to = "Valeur")
+  tidyr::pivot_longer(cols = c(HB, Hbmass, PV), names_to = "Mesure", values_to = "Valeur")
 
 ggplot(df_moyennes, aes(x = Altitude, y = Valeur, color = Mesure, group = Mesure)) +
   geom_line(linewidth = 1.2) +
@@ -62,6 +70,7 @@ check_normality(mod)
 check_autocorrelation(mod)
 check_outliers(mod)
 ```
+
 ```{r}
 data$rank_HB <- rank(data$HB)
 data$rank_HBMASS <- rank(data$Hb.mass.kg..g...kg.)
@@ -71,6 +80,7 @@ ggplot(data, aes(x = rank_HBMASS, y = rank_HB)) +
   geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
   labs(title = "Comparaison des rangs HB vs HBMASS")
 ```
+
 ```{r}
 ggplot(data, aes(x = Hb.mass.kg..g...kg., y = HB)) +
   geom_point() +
@@ -84,5 +94,27 @@ data$ecart <- data$rank_HB - data$rank_HBMASS
 ggplot(data, aes(x = ecart)) +
   geom_histogram(bins = 50) +
   labs(title = "Distribution des écarts de rang HB - HBMASS")
+```
+
+```{r}
+#R2 Adj.	0.502	0.884	0.913	0.928	0.928
+mod1 = lm(HB ~ Hb.mass.kg..g...kg., data = data)
+mod2 = lm(HB ~ Hb.mass.kg..g...kg. + PV..kg..ml.kg. , data = data)
+mod3 = lm(HB ~ Hb.mass.kg..g...kg. + PV..kg..ml.kg. + Altitude, data = data)
+mod4 = lm(HB ~ Hb.mass.kg..g...kg. * Altitude + PV..kg..ml.kg. * Altitude, data = data)
+mod5 = lm(HB ~ Hb.mass.kg..g...kg. * Altitude + PV..kg..ml.kg. * Altitude * Sexe_F_Fille_G_Garçon, data = data)
+models = list(mod1, mod2, mod3, mod4, mod5)
+modelsummary(models, stars = T, statistic = NULL)
+```
+
+```{r}
+#R2 Adj.	0.291	0.870	0.900	0.920	0.923
+mod1 = lm(HB ~ Hb.mass..g., data = data)
+mod2 = lm(HB ~ Hb.mass..g. + PV.ml. , data = data)
+mod3 = lm(HB ~ Hb.mass..g. + PV.ml. + Altitude, data = data)
+mod4 = lm(HB ~ Hb.mass..g. * Altitude + PV.ml. * Altitude, data = data)
+mod5 = lm(HB ~ Hb.mass..g. * Altitude + PV.ml. * Altitude * Sexe_F_Fille_G_Garçon, data = data)
+models = list(mod1, mod2, mod3, mod4, mod5)
+modelsummary(models, stars = T, statistic = NULL)
 ```
 

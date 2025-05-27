@@ -1,0 +1,117 @@
+```{r}
+library(dplyr)
+library(tidyr)
+library(modelsummary)
+library(glue)
+library(gt)
+library(car)
+library(dunn.test)
+library(rcompanion)
+library(rstatix)
+library(purrr)
+library(ggplot2)
+library(patchwork)
+library(psych)
+library(performance)
+library(lmtest)
+library(readxl)
+library(openxlsx)
+library(pheatmap)
+library(randomForest)
+```
+
+```{r}
+diag = read.csv("data/diags.csv")
+nutri = read.csv("data/nutri.csv")
+diag = diag[,-c(1,3)]
+data = left_join(diag, nutri, by = c("Code_Sujet", "Age_mois", "Age_categorie_binaire"))
+data <- data[data$Age_categorie_binaire == "8-12 ans",]
+```
+
+```{r}
+data_long <- data %>%
+  pivot_longer(
+    cols = starts_with("Anemie_") | starts_with("Polyglobulie_"),
+    names_to = "Diagnostic",
+    values_to = "Valeur"  # oui / non / NA
+  ) %>%
+  filter(!is.na(Valeur))  # tu peux choisir de garder ou non les NA
+```
+
+```{r}
+data_long %>%
+  group_by(Diagnostic, Valeur) %>%
+  summarise(
+    moy_fer = mean(Fer..mg.100.g., na.rm = TRUE),
+    moy_calories = mean(kCalHors.fibres, na.rm = TRUE),
+    n = n()
+  )
+```
+
+```{r}
+ggplot(data_long, aes(x = Valeur, y = Fer..mg.100.g.)) +
+  geom_boxplot() +
+  facet_wrap(~ Diagnostic, scales = "free_y") +
+  labs(title = "Apport en fer selon chaque critère de diagnostic")
+```
+
+```{r}
+ggplot(data_long, aes(x = Valeur, y = kCalHors.fibres)) +
+  geom_boxplot() +
+  facet_wrap(~ Diagnostic, scales = "free_y") +
+  labs(title = "Apport en fer selon chaque critère de diagnostic")
+```
+
+```{r}
+noms_groupes <- unique(data_long %>% group_by(Diagnostic) %>% pull(Diagnostic))
+
+for (i in noms_groupes) {
+  formule <- as.formula(paste("Fer..mg.100.g. ~", i))
+  mod = lm(formule, data = data)
+  print(summary(mod))
+}
+```
+
+```{r}
+for (i in noms_groupes) {
+  formule <- as.formula(paste("kCalHors.fibres ~", i))
+  mod = lm(formule, data = data)
+  print(summary(mod))
+}
+```
+
+
+```{r}
+mod1 = lm(Fer..mg.100.g. ~ Diagnostic * Valeur, data = data_long)
+mod2 = lm(kCalHors.fibres ~ Diagnostic * Valeur, data = data_long)
+
+summary(mod1)
+check_heteroskedasticity(mod1)
+check_normality(mod1)
+check_autocorrelation(mod1)
+check_outliers(mod1)
+summary(mod2)
+check_heteroskedasticity(mod2)
+check_normality(mod2)
+check_autocorrelation(mod2)
+check_outliers(mod2)
+```
+```{r}
+mod = lm(Fer..mg.100.g. ~ Polyglobulie_14.5_OMS2024, data = data)
+summary(mod)
+qqPlot(mod)
+```
+```{r}
+data_subset <- data %>%
+  select(Fer..mg.100.g., kCalHors.fibres, Anemie_OMS2011, Anemie_OMS2024, Anemie_SD, Anemie_2SD, Anemie_Q10, Anemie_2SD_Hbmass_kg, Anemie_Q10_Hbmass, Polyglobulie_14.5_OMS2011, Polyglobulie_14.5_OMS2024, Polyglobulie_SD, Polyglobulie_2SD, Polyglobulie_Q90, Polyglobulie_SD_Hbmass_kg, Polyglobulie_2SD_Hbmass_kg, Polyglobulie_Q90_Hbmass)
+data_subset_all <- na.omit(data_subset)
+mod1 = randomForest(Fer..mg.100.g. ~ ., data = data_subset_all[,-2], importance = TRUE, ntree = 100000)
+mod2 = randomForest(kCalHors.fibres ~ ., data = data_subset_all[,-1], importance = TRUE, ntree = 100000)
+
+varImpPlot(mod1)
+varImpPlot(mod2)
+
+```
+
+
+

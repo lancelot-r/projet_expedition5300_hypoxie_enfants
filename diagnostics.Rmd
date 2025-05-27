@@ -1,0 +1,314 @@
+---
+title: "Untitled"
+author: "Lancelot Ravier"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(modelsummary)
+library(glue)
+library(gt)
+library(car)
+library(dunn.test)
+library(rcompanion)
+library(rstatix)
+library(purrr)
+library(ggplot2)
+library(patchwork)
+library(psych)
+library(performance)
+library(lmtest)
+library(readxl)
+library(openxlsx)
+library(pheatmap)
+```
+
+
+```{r}
+data = read.csv("data/datafinal.csv")
+```
+
+```{r}
+data_3ans = data[data$Age_categorie_binaire == "0-3 ans",]
+data_12ans = data[data$Age_categorie_binaire == "8-12 ans",]
+```
+
+```{r}
+data_prevalence <- data %>%
+  select(Code_Sujet, Ville_eval, Age_categorie_binaire, Anemie_OMS2011, Anemie_OMS2024, Anemie_SD, Anemie_2SD, Anemie_Q10, Anemie_2SD_Hbmass_kg, Anemie_Q10_Hbmass, Polyglobulie_14.5_OMS2011, Polyglobulie_14.5_OMS2024, Polyglobulie_SD, Polyglobulie_2SD, Polyglobulie_Q90, Polyglobulie_SD_Hbmass_kg, Polyglobulie_2SD_Hbmass_kg, Polyglobulie_Q90_Hbmass)
+
+data_long <- data %>%
+  select(Ville_eval, starts_with("Anemie"), starts_with("Polyglobulie"), Age_categorie_binaire) %>%
+  pivot_longer(
+    cols = -c(Ville_eval, Age_categorie_binaire),
+    names_to = "Méthode",
+    values_to = "Résultat"
+  )
+
+data_long <- data_long %>%
+  mutate(
+    Type = case_when(
+      grepl("Anemie", Méthode) ~ "Anémie",
+      grepl("Polyglobulie", Méthode) ~ "Polyglobulie"
+    )
+  )
+
+prevalence <- data_long %>%
+  group_by(Ville_eval, Age_categorie_binaire, Méthode, Type) %>%
+  summarise(
+    Prevalence = mean(Résultat == "oui", na.rm = TRUE) * 100,
+    .groups = "drop"
+  )
+```
+
+```{r}
+prevalence_3 = prevalence[prevalence$Age_categorie_binaire == "0-3 ans",]
+prevalence_3 <- prevalence_3[!grepl("Hbmass", prevalence_3$Méthode), ]
+prevalence_3_anemie <- prevalence_3[!grepl("Polyglobulie", prevalence_3$Méthode), ]
+prevalence_3_poly <- prevalence_3[!grepl("Anemie", prevalence_3$Méthode), ]
+prevalence_12 = prevalence[prevalence$Age_categorie_binaire == "8-12 ans",]
+prevalence_12_anemie <- prevalence_12[!grepl("Polyglobulie", prevalence_12$Méthode), ]
+prevalence_12_poly <- prevalence_12[!grepl("Anemie", prevalence_12$Méthode), ]
+
+f1 = ggplot(prevalence_3_anemie, aes(x = Méthode, y = Prevalence, fill = Ville_eval)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  labs(
+    title = "Prévalence de l’anémie et de la polyglobulie par méthode et par ville",
+    x = "Méthode",
+    y = "Prévalence (%)",
+    fill = "Ville"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(face = "bold")
+  )
+
+f2 = ggplot(prevalence_12_anemie, aes(x = Méthode, y = Prevalence, fill = Ville_eval)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  labs(
+    title = "Prévalence de l’anémie et de la polyglobulie par méthode et par ville",
+    x = "Méthode",
+    y = "Prévalence (%)",
+    fill = "Ville"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(face = "bold")
+  )
+
+f1 + f2
+```
+```{r}
+
+
+f1 = ggplot(prevalence_3_poly, aes(x = Méthode, y = Prevalence, fill = Ville_eval)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  labs(
+    title = "Prévalence de l’anémie et de la polyglobulie par méthode et par ville",
+    x = "Méthode",
+    y = "Prévalence (%)",
+    fill = "Ville"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(face = "bold")
+  )
+
+f2 = ggplot(prevalence_12_poly, aes(x = Méthode, y = Prevalence, fill = Ville_eval)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  labs(
+    title = "Prévalence de l’anémie et de la polyglobulie par méthode et par ville",
+    x = "Méthode",
+    y = "Prévalence (%)",
+    fill = "Ville"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(face = "bold")
+  )
+
+f1 + f2
+```
+```{r}
+data_long_3_anemie = data_long[data_long$Age_categorie_binaire == "0-3 ans",]
+data_long_3_anemie <- data_long_3_anemie[!grepl("Polyglobulie", data_long_3_anemie$Méthode), ]
+data_long_3_anemie <- data_long_3_anemie[!grepl("Hbmass", data_long_3_anemie$Méthode), ]
+
+data_long_3_poly = data_long[data_long$Age_categorie_binaire == "0-3 ans",]
+data_long_3_poly <- data_long_3_poly[!grepl("Anemie", data_long_3_poly$Méthode), ]
+data_long_3_poly <- data_long_3_poly[!grepl("Hbmass", data_long_3_poly$Méthode), ]
+
+data_long_12_anemie = data_long[data_long$Age_categorie_binaire == "8-12 ans",]
+data_long_12_anemie <- data_long_12_anemie[!grepl("Polyglobulie", data_long_12_anemie$Méthode), ]
+
+data_long_12_poly = data_long[data_long$Age_categorie_binaire == "8-12 ans",]
+data_long_12_poly <- data_long_12_poly[!grepl("Anemie", data_long_12_poly$Méthode), ]
+
+prevalence_globale_3_anemie <- data_long_3_anemie %>%
+  group_by(Type, Méthode) %>%
+  summarise(
+    Prevalence = mean(Résultat == "oui", na.rm = TRUE) * 100,
+    .groups = "drop"
+  )
+
+prevalence_globale_3_poly <- data_long_3_poly %>%
+  group_by(Type, Méthode) %>%
+  summarise(
+    Prevalence = mean(Résultat == "oui", na.rm = TRUE) * 100,
+    .groups = "drop"
+  )
+
+prevalence_globale_12_anemie <- data_long_12_anemie %>%
+  group_by(Type, Méthode) %>%
+  summarise(
+    Prevalence = mean(Résultat == "oui", na.rm = TRUE) * 100,
+    .groups = "drop"
+  )
+
+prevalence_globale_12_poly <- data_long_12_poly %>%
+  group_by(Type, Méthode) %>%
+  summarise(
+    Prevalence = mean(Résultat == "oui", na.rm = TRUE) * 100,
+    .groups = "drop"
+  )
+```
+
+```{r}
+df_expanded <- data_long_3_anemie %>% 
+  select(Méthode, Résultat) %>%
+  filter(Résultat != "")
+
+res <- df_expanded %>%
+  pairwise_fisher_test(
+    Résultat ~ Méthode,
+    p.adjust.method = "holm"
+  )
+```
+
+```{r}
+library(dplyr)
+library(rstatix)
+library(stringr)
+
+# Étape 1 : Nettoyer les lignes vides ou NA
+df_expanded_3a <- data_long_3_anemie %>%
+  select(Méthode, Résultat) %>%
+  filter(!is.na(Résultat) & str_trim(Résultat) != "")
+
+df_expanded_3p <- data_long_3_poly %>%
+  select(Méthode, Résultat) %>%
+  filter(!is.na(Résultat) & str_trim(Résultat) != "")
+
+df_expanded_12a <- data_long_12_anemie %>%
+  select(Méthode, Résultat) %>%
+  filter(!is.na(Résultat) & str_trim(Résultat) != "")
+
+df_expanded_12p <- data_long_12_poly %>%
+  select(Méthode, Résultat) %>%
+  filter(!is.na(Résultat) & str_trim(Résultat) != "")
+```
+
+```{r}
+pairwise_fisher_test(table(df_expanded_3a), p.adjust.method = "holm")
+pairwise_fisher_test(table(df_expanded_3p), p.adjust.method = "holm")
+pairwise_fisher_test(table(df_expanded_12a), p.adjust.method = "holm")
+pairwise_fisher_test(table(df_expanded_12p), p.adjust.method = "holm")
+```
+
+```{r}
+cohen1 <- cohen.kappa(data_3ans[,c("Anemie_OMS2011", "Anemie_OMS2024", "Anemie_SD", "Anemie_2SD", "Anemie_Q10")])
+cohen2 <- cohen.kappa(data_3ans[,c("Polyglobulie_14.5_OMS2011", "Polyglobulie_14.5_OMS2024", "Polyglobulie_SD", "Polyglobulie_2SD", "Polyglobulie_Q90")])
+cohen3 <- cohen.kappa(data_12ans[,c("Anemie_OMS2011", "Anemie_OMS2024", "Anemie_SD", "Anemie_2SD", "Anemie_Q10", "Anemie_SD_Hbmass_kg", "Anemie_2SD_Hbmass_kg", "Anemie_Q10_Hbmass")])
+cohen4 <- cohen.kappa(data_12ans[,c("Polyglobulie_14.5_OMS2011", "Polyglobulie_14.5_OMS2024", "Polyglobulie_SD", "Polyglobulie_2SD", "Polyglobulie_Q90", "Polyglobulie_SD_Hbmass_kg", "Polyglobulie_2SD_Hbmass_kg", "Polyglobulie_Q90_Hbmass")])
+```
+
+```{r}
+pheatmap(cohen1$cohen.kappa, display_numbers = T)
+```
+
+```{r}
+tableomsq10a3 = table(data_3ans$Anemie_OMS2024, data_3ans$Anemie_Q10)
+tableomsq10a12 = table(data_12ans$Anemie_OMS2024, data_12ans$Anemie_Q10)
+tableomsq10p3 = table(data_3ans$Polyglobulie_14.5_OMS2024, data_3ans$Polyglobulie_Q90)
+tableomsq10p12 = table(data_12ans$Polyglobulie_14.5_OMS2024, data_12ans$Polyglobulie_Q90)
+tableomsq10p12hb = table(data_12ans$Polyglobulie_14.5_OMS2024, data_12ans$Polyglobulie_Q90_Hbmass)
+```
+
+```{r}
+chisq.test(data_3ans$Anemie_Q10, data_3ans$Ville_eval)
+chisq.test(data_12ans$Anemie_Q10, data_12ans$Ville_eval)
+chisq.test(data_3ans$Polyglobulie_Q90, data_3ans$Ville_eval)
+chisq.test(data_12ans$Polyglobulie_Q90, data_12ans$Ville_eval)
+```
+
+```{r}
+table(data$Anemie_SD, data$Anemie_SD_Hbmass_kg)
+```
+
+
+```{r}
+data.hbmass = data %>%
+  select("Anemie_SD", "Anemie_SD_Hbmass_kg") %>%
+  na.omit()
+
+p1 = ggplot(data.hbmass, aes(x = Anemie_SD, fill = Anemie_SD_Hbmass_kg)) +
+  geom_bar(position = "stack") +
+  scale_fill_manual(values = c("oui" = "#F4A6A6", "non" = "#A6D8A8")) +
+  labs(x = "Anemie_SD", fill = "Anemie_SD_Hbmass_kg") +
+  theme_minimal()
+
+p2 = ggplot(data.hbmass, aes(x = Anemie_SD, fill = Anemie_SD_Hbmass_kg)) +
+  geom_bar(position = "fill") +  # pour proportions
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_manual(values = c("oui" = "#F4A6A6", "non" = "#A6D8A8")) +
+  labs(x = "Anemie_SD", fill = "Anemie_SD_Hbmass_kg")
+
+p1 + p2
+
+tab = table(data.hbmass$Anemie_SD, data.hbmass$Anemie_SD_Hbmass_kg)
+print(tab)
+mcnemar.test(tab)
+```
+```{r}
+data.hbmass = data %>%
+  select("Anemie_2SD", "Anemie_2SD_Hbmass_kg") %>%
+  na.omit()
+
+p1 = ggplot(data.hbmass, aes(x = Anemie_2SD, fill = Anemie_2SD_Hbmass_kg)) +
+  geom_bar(position = "stack") +
+  scale_fill_manual(values = c("oui" = "#F4A6A6", "non" = "#A6D8A8")) +
+  labs(x = "Anemie_2SD", fill = "Anemie_2SD_Hbmass_kg") +
+  theme_minimal()
+
+p2 = ggplot(data.hbmass, aes(x = Anemie_2SD, fill = Anemie_2SD_Hbmass_kg)) +
+  geom_bar(position = "fill") +  # pour proportions
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_manual(values = c("oui" = "#F4A6A6", "non" = "#A6D8A8")) +
+  labs(x = "Anemie_2SD", fill = "Anemie_2SD_Hbmass_kg")
+
+p1 + p2
+
+tab = table(data.hbmass$Anemie_2SD, data.hbmass$Anemie_2SD_Hbmass_kg)
+print(tab)
+mcnemar.test(tab)
+```
+```{r}
+tab1 = table(data$Anemie_SD, data$Anemie_SD_Hbmass_kg)
+tab2 = table(data$Anemie_2SD, data$Anemie_2SD_Hbmass_kg)
+
+mcnemar.test(tab1)
+mcnemar.test(tab2)
+```
+
+
