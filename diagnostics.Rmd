@@ -6,7 +6,7 @@ output:
   html_document: default
   pdf_document: default
 editor_options:
-  chunk_output_type: inline
+  chunk_output_type: console
 ---
 
 ```{r}
@@ -28,12 +28,418 @@ library(lmtest)
 library(readxl)
 library(openxlsx)
 library(pheatmap)
+library(ggpubr)
 ```
-
 
 ```{r}
-data = read.csv("data/datafinal.csv")
+data = read.csv("data/diags.csv")
+data = data[data$Age_categorie_binaire == "0-3 ans", ]
+data = data[, -c(11,12,13)]
+data_long <- data %>%
+  pivot_longer(
+    cols = starts_with("Anemie_"),
+    names_to = "Méthode",
+    values_to = "Résultat"
+  ) %>%
+  mutate(
+    Résultat_bin = ifelse(Résultat == "oui", 1, 0),
+    Type = "Anémie"
+  )
+
+global_tests <- data_long %>%
+  group_by(Méthode) %>%
+  summarise(
+    p_global = {
+      tbl <- table(Ville_eval, Résultat_bin)
+      if (any(tbl < 5)) fisher.test(tbl)$p.value else chisq.test(tbl)$p.value
+    },
+    .groups = "drop"
+  )
+
+prevalence <- data_long %>%
+  group_by(Ville_eval, Méthode) %>%
+  summarise(
+    Prevalence = mean(Résultat_bin, na.rm = TRUE) * 100,
+    .groups = "drop"
+  )
+
+ville_pairs <- combn(unique(data_long$Ville_eval), 2, simplify = FALSE)
+
+# Fonction pour calculer les p-values pour chaque paire de villes et chaque méthode
+all_pvals <- lapply(ville_pairs, function(pair) {
+  ville1 <- pair[1]
+  ville2 <- pair[2]
+  
+  data_sub <- data_long %>%
+    filter(Ville_eval %in% pair)
+  
+  data_sub %>%
+    group_by(Méthode) %>%
+    summarise(
+      p = {
+        tbl <- table(Ville_eval, Résultat_bin)
+        if (any(tbl < 5)) fisher.test(tbl)$p.value else chisq.test(tbl)$p.value
+      },
+      group1 = ville1,
+      group2 = ville2,
+      .groups = "drop"
+    )
+})
+
+# Fusionner toutes les paires
+p_values <- bind_rows(all_pvals)
+p_values <- p_values %>%
+  mutate(
+    p.signif = case_when(
+      p < 0.001 ~ "***",
+      p < 0.01  ~ "**",
+      p < 0.05  ~ "*",
+      TRUE      ~ "ns"
+    )
+  )
+p_values <- p_values %>%
+  left_join(global_tests, by = "Méthode") %>%
+  filter(p_global < 0.05)
+
+# Ajouter des positions Y pour éviter le chevauchement des p-values
+max_prev <- prevalence %>% group_by(Méthode) %>% summarise(maxY = max(Prevalence))
+p_values <- p_values %>%
+  left_join(max_prev, by = "Méthode") %>%
+  group_by(Méthode) %>%
+  mutate(y.position = maxY + 5 + 5 * row_number()) %>%
+  ungroup()
+
+ggplot(data_long, aes(x = Ville_eval, y = Résultat_bin * 100, fill = Ville_eval)) +
+  stat_summary(fun = mean, geom = "bar", position = position_dodge(width = 0.8)) +
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.2, position = position_dodge(width = 0.8)) +
+  stat_pvalue_manual(
+    data = p_values,
+    label = "p.signif",
+    y.position = "y.position",
+    xmin = "group1",
+    xmax = "group2",
+    tip.length = 0.01,
+    bracket.size = 0.6,
+    inherit.aes = FALSE
+  ) +
+  facet_wrap(~ Méthode, scales = "free_y") +
+  labs(
+    title = "Prévalence d’anémie chez les 0-3 ans",
+    x = "Ville",
+    y = "Prévalence (%)",
+    fill = "Ville"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
+
+```{r}
+data = read.csv("data/diags.csv")
+data = data[data$Age_categorie_binaire == "0-3 ans", ]
+data = data[, -c(19,20,21)]
+data_long <- data %>%
+  pivot_longer(
+    cols = starts_with("Polyglobulie_"),
+    names_to = "Méthode",
+    values_to = "Résultat"
+  ) %>%
+  mutate(
+    Résultat_bin = ifelse(Résultat == "oui", 1, 0),
+    Type = "Polyglobulie"
+  )
+
+global_tests <- data_long %>%
+  group_by(Méthode) %>%
+  summarise(
+    p_global = {
+      tbl <- table(Ville_eval, Résultat_bin)
+      if (any(tbl < 5)) fisher.test(tbl)$p.value else chisq.test(tbl)$p.value
+    },
+    .groups = "drop"
+  )
+
+prevalence <- data_long %>%
+  group_by(Ville_eval, Méthode) %>%
+  summarise(
+    Prevalence = mean(Résultat_bin, na.rm = TRUE) * 100,
+    .groups = "drop"
+  )
+
+ville_pairs <- combn(unique(data_long$Ville_eval), 2, simplify = FALSE)
+
+# Fonction pour calculer les p-values pour chaque paire de villes et chaque méthode
+all_pvals <- lapply(ville_pairs, function(pair) {
+  ville1 <- pair[1]
+  ville2 <- pair[2]
+  
+  data_sub <- data_long %>%
+    filter(Ville_eval %in% pair)
+  
+  data_sub %>%
+    group_by(Méthode) %>%
+    summarise(
+      p = {
+        tbl <- table(Ville_eval, Résultat_bin)
+        if (any(tbl < 5)) fisher.test(tbl)$p.value else chisq.test(tbl)$p.value
+      },
+      group1 = ville1,
+      group2 = ville2,
+      .groups = "drop"
+    )
+})
+
+# Fusionner toutes les paires
+p_values <- bind_rows(all_pvals)
+p_values <- p_values %>%
+  mutate(
+    p.signif = case_when(
+      p < 0.001 ~ "***",
+      p < 0.01  ~ "**",
+      p < 0.05  ~ "*",
+      TRUE      ~ "ns"
+    )
+  )
+p_values <- p_values %>%
+  left_join(global_tests, by = "Méthode") %>%
+  filter(p_global < 0.05)
+
+# Ajouter des positions Y pour éviter le chevauchement des p-values
+max_prev <- prevalence %>% group_by(Méthode) %>% summarise(maxY = max(Prevalence))
+p_values <- p_values %>%
+  left_join(max_prev, by = "Méthode") %>%
+  group_by(Méthode) %>%
+  mutate(y.position = maxY + 5 + 5 * row_number()) %>%
+  ungroup()
+
+ggplot(data_long, aes(x = Ville_eval, y = Résultat_bin * 100, fill = Ville_eval)) +
+  stat_summary(fun = mean, geom = "bar", position = position_dodge(width = 0.8)) +
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.2, position = position_dodge(width = 0.8)) +
+  stat_pvalue_manual(
+    data = p_values,
+    label = "p.signif",
+    y.position = "y.position",
+    xmin = "group1",
+    xmax = "group2",
+    tip.length = 0.01,
+    bracket.size = 0.6,
+    inherit.aes = FALSE
+  ) +
+  facet_wrap(~ Méthode, scales = "free_y") +
+  labs(
+    title = "Prévalence d’anémie chez les 0-3 ans",
+    x = "Ville",
+    y = "Prévalence (%)",
+    fill = "Ville"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+data = read.csv("data/diags.csv")
+data = data[data$Age_categorie_binaire == "8-12 ans", ]
+
+data_long <- data %>%
+  pivot_longer(
+    cols = starts_with("Anemie_"),
+    names_to = "Méthode",
+    values_to = "Résultat"
+  ) %>%
+  mutate(
+    Résultat_bin = ifelse(Résultat == "oui", 1, 0),
+    Type = "Anémie"
+  )
+
+global_tests <- data_long %>%
+  group_by(Méthode) %>%
+  summarise(
+    p_global = {
+      tbl <- table(Ville_eval, Résultat_bin)
+      if (any(tbl < 5)) fisher.test(tbl)$p.value else chisq.test(tbl)$p.value
+    },
+    .groups = "drop"
+  )
+
+prevalence <- data_long %>%
+  group_by(Ville_eval, Méthode) %>%
+  summarise(
+    Prevalence = mean(Résultat_bin, na.rm = TRUE) * 100,
+    .groups = "drop"
+  )
+
+ville_pairs <- combn(unique(data_long$Ville_eval), 2, simplify = FALSE)
+
+# Fonction pour calculer les p-values pour chaque paire de villes et chaque méthode
+all_pvals <- lapply(ville_pairs, function(pair) {
+  ville1 <- pair[1]
+  ville2 <- pair[2]
+  
+  data_sub <- data_long %>%
+    filter(Ville_eval %in% pair)
+  
+  data_sub %>%
+    group_by(Méthode) %>%
+    summarise(
+      p = {
+        tbl <- table(Ville_eval, Résultat_bin)
+        if (any(tbl < 5)) fisher.test(tbl)$p.value else chisq.test(tbl)$p.value
+      },
+      group1 = ville1,
+      group2 = ville2,
+      .groups = "drop"
+    )
+})
+
+# Fusionner toutes les paires
+p_values <- bind_rows(all_pvals)
+p_values <- p_values %>%
+  mutate(
+    p.signif = case_when(
+      p < 0.001 ~ "***",
+      p < 0.01  ~ "**",
+      p < 0.05  ~ "*",
+      TRUE      ~ "ns"
+    )
+  )
+p_values <- p_values %>%
+  left_join(global_tests, by = "Méthode") %>%
+  filter(p_global < 0.05)
+
+# Ajouter des positions Y pour éviter le chevauchement des p-values
+max_prev <- prevalence %>% group_by(Méthode) %>% summarise(maxY = max(Prevalence))
+p_values <- p_values %>%
+  left_join(max_prev, by = "Méthode") %>%
+  group_by(Méthode) %>%
+  mutate(y.position = maxY + 5 + 5 * row_number()) %>%
+  ungroup()
+
+ggplot(data_long, aes(x = Ville_eval, y = Résultat_bin * 100, fill = Ville_eval)) +
+  stat_summary(fun = mean, geom = "bar", position = position_dodge(width = 0.8)) +
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.2, position = position_dodge(width = 0.8)) +
+  stat_pvalue_manual(
+    data = p_values,
+    label = "p.signif",
+    y.position = "y.position",
+    xmin = "group1",
+    xmax = "group2",
+    tip.length = 0.01,
+    bracket.size = 0.6,
+    inherit.aes = FALSE
+  ) +
+  facet_wrap(~ Méthode, scales = "free_y") +
+  labs(
+    title = "Prévalence d’anémie chez les 8-12 ans",
+    x = "Ville",
+    y = "Prévalence (%)",
+    fill = "Ville"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+data = read.csv("data/diags.csv")
+data = data[data$Age_categorie_binaire == "8-12 ans", ]
+
+data_long <- data %>%
+  pivot_longer(
+    cols = starts_with("Polyglobulie_"),
+    names_to = "Méthode",
+    values_to = "Résultat"
+  ) %>%
+  mutate(
+    Résultat_bin = ifelse(Résultat == "oui", 1, 0),
+    Type = "Polyglobulie"
+  )
+
+global_tests <- data_long %>%
+  group_by(Méthode) %>%
+  summarise(
+    p_global = {
+      tbl <- table(Ville_eval, Résultat_bin)
+      if (any(tbl < 5)) fisher.test(tbl)$p.value else chisq.test(tbl)$p.value
+    },
+    .groups = "drop"
+  )
+
+prevalence <- data_long %>%
+  group_by(Ville_eval, Méthode) %>%
+  summarise(
+    Prevalence = mean(Résultat_bin, na.rm = TRUE) * 100,
+    .groups = "drop"
+  )
+
+ville_pairs <- combn(unique(data_long$Ville_eval), 2, simplify = FALSE)
+
+# Fonction pour calculer les p-values pour chaque paire de villes et chaque méthode
+all_pvals <- lapply(ville_pairs, function(pair) {
+  ville1 <- pair[1]
+  ville2 <- pair[2]
+  
+  data_sub <- data_long %>%
+    filter(Ville_eval %in% pair)
+  
+  data_sub %>%
+    group_by(Méthode) %>%
+    summarise(
+      p = {
+        tbl <- table(Ville_eval, Résultat_bin)
+        if (any(tbl < 5)) fisher.test(tbl)$p.value else chisq.test(tbl)$p.value
+      },
+      group1 = ville1,
+      group2 = ville2,
+      .groups = "drop"
+    )
+})
+
+# Fusionner toutes les paires
+p_values <- bind_rows(all_pvals)
+p_values <- p_values %>%
+  mutate(
+    p.signif = case_when(
+      p < 0.001 ~ "***",
+      p < 0.01  ~ "**",
+      p < 0.05  ~ "*",
+      TRUE      ~ "ns"
+    )
+  )
+p_values <- p_values %>%
+  left_join(global_tests, by = "Méthode") %>%
+  filter(p_global < 0.05)
+
+# Ajouter des positions Y pour éviter le chevauchement des p-values
+max_prev <- prevalence %>% group_by(Méthode) %>% summarise(maxY = max(Prevalence))
+p_values <- p_values %>%
+  left_join(max_prev, by = "Méthode") %>%
+  group_by(Méthode) %>%
+  mutate(y.position = maxY + 5 + 5 * row_number()) %>%
+  ungroup()
+
+ggplot(data_long, aes(x = Ville_eval, y = Résultat_bin * 100, fill = Ville_eval)) +
+  stat_summary(fun = mean, geom = "bar", position = position_dodge(width = 0.8)) +
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.2, position = position_dodge(width = 0.8)) +
+  stat_pvalue_manual(
+    data = p_values,
+    label = "p.signif",
+    y.position = "y.position",
+    xmin = "group1",
+    xmax = "group2",
+    tip.length = 0.01,
+    bracket.size = 0.6,
+    inherit.aes = FALSE
+  ) +
+  facet_wrap(~ Méthode, scales = "free_y") +
+  labs(
+    title = "Prévalence dde polyglobulie chez les 8-12 ans",
+    x = "Ville",
+    y = "Prévalence (%)",
+    fill = "Ville"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
 
 ```{r}
 data_3ans = data[data$Age_categorie_binaire == "0-3 ans",]
@@ -67,6 +473,7 @@ prevalence <- data_long %>%
     .groups = "drop"
   )
 ```
+
 
 ```{r}
 prevalence_3 = prevalence[prevalence$Age_categorie_binaire == "0-3 ans",]
@@ -105,7 +512,14 @@ f2 = ggplot(prevalence_12_anemie, aes(x = Méthode, y = Prevalence, fill = Ville
     plot.title = element_text(face = "bold")
   )
 
-f1 + f2
+f1 + 
+  stat_pvalue_manual(
+    data = p_values,
+    label = "p", 
+    y.position = "y.position",
+    tip.length = 0,
+    bracket.size = 0.8
+  )
 ```
 ```{r}
 
@@ -140,6 +554,47 @@ f2 = ggplot(prevalence_12_poly, aes(x = Méthode, y = Prevalence, fill = Ville_e
 
 f1 + f2
 ```
+```{r}
+data_test <- data_long %>%
+  filter(
+    Age_categorie_binaire == "0-3 ans",
+    Type == "Anémie",
+    !grepl("Hbmass", Méthode)
+  ) %>%
+  mutate(Résultat_bin = ifelse(Résultat == "oui", 1, 0))
+
+get_pvalue <- function(subdata) {
+  tbl <- table(subdata$Ville_eval, subdata$Résultat_bin)
+  if (any(tbl < 5)) {
+    p <- fisher.test(tbl)$p.value
+  } else {
+    p <- chisq.test(tbl)$p.value
+  }
+  return(p)
+}
+
+# Appliquer la fonction pour chaque méthode
+p_values <- data_test %>%
+  group_by(Méthode) %>%
+  summarise(p = get_pvalue(cur_data()), .groups = "drop") %>%
+  mutate(y.position = seq(45, 45 + 5 * (n() - 1), by = 5))
+
+
+f1 + 
+  stat_pvalue_manual(
+    data = p_values,
+    label = "p",          # ou "p.signif" pour afficher des étoiles
+    y.position = "y.position",
+    tip.length = 0.01,
+    bracket.size = 0.6
+  )
+```
+
+
+
+
+
+
 ```{r}
 data_long_3_anemie = data_long[data_long$Age_categorie_binaire == "0-3 ans",]
 data_long_3_anemie <- data_long_3_anemie[!grepl("Polyglobulie", data_long_3_anemie$Méthode), ]
@@ -259,56 +714,133 @@ table(data$Anemie_SD, data$Anemie_SD_Hbmass_kg)
 
 ```{r}
 data.hbmass = data %>%
-  select("Anemie_SD", "Anemie_SD_Hbmass_kg") %>%
+  select("Anemie_OMS2024", "Anemie_SD_Hbmass_kg", "Anemie_2SD", "Anemie_2SD_Hbmass_kg") %>%
   na.omit()
 
-p1 = ggplot(data.hbmass, aes(x = Anemie_SD, fill = Anemie_SD_Hbmass_kg)) +
-  geom_bar(position = "stack") +
+data_summary <- data.hbmass %>%
+  count(Anemie_OMS2024, Anemie_SD_Hbmass_kg) %>%
+  group_by(Anemie_OMS2024) %>%
+  mutate(prop = n / sum(n))
+
+p1 = ggplot(data_summary, aes(x = Anemie_OMS2024, y = n, fill = Anemie_SD_Hbmass_kg)) +
+  geom_col(position = "stack") +
+  geom_text(aes(label = scales::percent(prop, accuracy = 1)), 
+            position = position_stack(vjust = 0.5), color = "black") +
   scale_fill_manual(values = c("oui" = "#F4A6A6", "non" = "#A6D8A8")) +
-  labs(x = "Anemie_SD", fill = "Anemie_SD_Hbmass_kg") +
+  labs(x = "Anemie_SD", y = "Effectifs", fill = "Anemie_SD_Hbmass_kg") +
   theme_minimal()
 
-p2 = ggplot(data.hbmass, aes(x = Anemie_SD, fill = Anemie_SD_Hbmass_kg)) +
-  geom_bar(position = "fill") +  # pour proportions
-  scale_y_continuous(labels = scales::percent) +
+data_summary2 <- data.hbmass %>%
+  count(Anemie_OMS2024, Anemie_2SD_Hbmass_kg) %>%
+  group_by(Anemie_OMS2024) %>%
+  mutate(prop = n / sum(n))
+
+p2 = ggplot(data_summary2, aes(x = Anemie_OMS2024, y = n, fill = Anemie_2SD_Hbmass_kg)) +
+  geom_col(position = "stack") +
+  geom_text(aes(label = scales::percent(prop, accuracy = 1)), 
+            position = position_stack(vjust = 0.5), color = "black") +
   scale_fill_manual(values = c("oui" = "#F4A6A6", "non" = "#A6D8A8")) +
-  labs(x = "Anemie_SD", fill = "Anemie_SD_Hbmass_kg")
+  labs(x = "Anemie_2SD", y = "Effectifs", fill = "Anemie_2SD_Hbmass_kg") +
+  theme_minimal()
 
 p1 + p2
-
-tab = table(data.hbmass$Anemie_SD, data.hbmass$Anemie_SD_Hbmass_kg)
-print(tab)
-mcnemar.test(tab)
 ```
 ```{r}
 data.hbmass = data %>%
-  select("Anemie_2SD", "Anemie_2SD_Hbmass_kg") %>%
+  select("Polyglobulie_SD", "Polyglobulie_SD_Hbmass_kg", "Polyglobulie_2SD", "Polyglobulie_2SD_Hbmass_kg") %>%
   na.omit()
 
-p1 = ggplot(data.hbmass, aes(x = Anemie_2SD, fill = Anemie_2SD_Hbmass_kg)) +
-  geom_bar(position = "stack") +
+data_summary <- data.hbmass %>%
+  count(Polyglobulie_SD, Polyglobulie_SD_Hbmass_kg) %>%
+  group_by(Polyglobulie_SD) %>%
+  mutate(prop = n / sum(n))
+
+p1 = ggplot(data_summary, aes(x = Polyglobulie_SD, y = n, fill = Polyglobulie_SD_Hbmass_kg)) +
+  geom_col(position = "stack") +
+  geom_text(aes(label = scales::percent(prop, accuracy = 1)), 
+            position = position_stack(vjust = 0.5), color = "black") +
   scale_fill_manual(values = c("oui" = "#F4A6A6", "non" = "#A6D8A8")) +
-  labs(x = "Anemie_2SD", fill = "Anemie_2SD_Hbmass_kg") +
+  labs(x = "Polyglobulie_SD", y = "Effectifs", fill = "Polyglobulie_SD_Hbmass_kg") +
   theme_minimal()
 
-p2 = ggplot(data.hbmass, aes(x = Anemie_2SD, fill = Anemie_2SD_Hbmass_kg)) +
-  geom_bar(position = "fill") +  # pour proportions
-  scale_y_continuous(labels = scales::percent) +
+data_summary2 <- data.hbmass %>%
+  count(Polyglobulie_2SD, Polyglobulie_2SD_Hbmass_kg) %>%
+  group_by(Polyglobulie_2SD) %>%
+  mutate(prop = n / sum(n))
+
+p2 = ggplot(data_summary2, aes(x = Polyglobulie_2SD, y = n, fill = Polyglobulie_2SD_Hbmass_kg)) +
+  geom_col(position = "stack") +
+  geom_text(aes(label = scales::percent(prop, accuracy = 1)), 
+            position = position_stack(vjust = 0.5), color = "black") +
   scale_fill_manual(values = c("oui" = "#F4A6A6", "non" = "#A6D8A8")) +
-  labs(x = "Anemie_2SD", fill = "Anemie_2SD_Hbmass_kg")
+  labs(x = "Polyglobulie_2SD", y = "Effectifs", fill = "Polyglobulie_2SD_Hbmass_kg") +
+  theme_minimal()
 
 p1 + p2
-
-tab = table(data.hbmass$Anemie_2SD, data.hbmass$Anemie_2SD_Hbmass_kg)
-print(tab)
-mcnemar.test(tab)
 ```
-```{r}
-tab1 = table(data$Anemie_SD, data$Anemie_SD_Hbmass_kg)
-tab2 = table(data$Anemie_2SD, data$Anemie_2SD_Hbmass_kg)
 
-mcnemar.test(tab1)
-mcnemar.test(tab2)
+```{r}
+data_clean <- data %>%
+  drop_na(Anemie_OMS2024, Anemie_SD)
+
+mcnemar_auto <- function(x, y, correct = FALSE) {
+  # Vérifier que x et y sont binaires
+  if (length(unique(na.omit(x))) != 2 || length(unique(na.omit(y))) != 2) {
+    stop("Les deux variables doivent être binaires (2 modalités).")
+  }
+
+  # Table de contingence
+  tbl <- table(x, y)
+
+  # Discordants
+  n01 <- tbl[1, 2]
+  n10 <- tbl[2, 1]
+  discordants <- n01 + n10
+
+  # Test exact si discordants < 25
+  if (discordants < 25) {
+    res <- mcnemar.test(tbl, correct = correct, exact = TRUE)
+    type <- "Test exact de McNemar"
+  } else {
+    res <- mcnemar.test(tbl, correct = correct)
+    type <- "Test de McNemar (chi²)"
+  }
+
+  # Retourne un résumé
+  list(
+    table = tbl,
+    method = type,
+    statistic = res$statistic,
+    p.value = res$p.value
+  )
+}
+
+pval = mcnemar_auto(data_clean$Anemie_OMS2024, data_clean$Anemie_SD)$p.value
+methode = mcnemar_auto(data_clean$Anemie_OMS2024, data_clean$Anemie_SD)$method
+n_total <- nrow(data_clean)
+
+# Créer un titre dynamique
+titre <- paste0(
+  "Proportions croisées anémie : OMS 2024 v.s. -1SD\n",
+  "n = ", n_total, " ; ", "pval ", methode, " = ", round(pval, 3)
+)
+
+# Construire la heatmap
+data_clean %>%
+  count(Anemie_OMS2024, Anemie_SD) %>%
+  group_by(Anemie_SD) %>%
+  mutate(prop = n / sum(n)) %>%
+  ggplot(aes(x = Anemie_OMS2024, y = Anemie_SD, fill = prop)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = scales::percent(prop, accuracy = 1)), size = 5) +
+  scale_fill_gradient(low = "white", high = "red") +
+  labs(
+    title = titre,
+    x = "Anémie_OMS2024",
+    y = "Anémie_SD",
+    fill = "Proportion"
+  ) +
+  theme_minimal()
 ```
 
 

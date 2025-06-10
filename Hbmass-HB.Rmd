@@ -31,7 +31,7 @@ data = read.csv("data/datafinal.csv")
 ```
 
 ```{r}
-ggplot(data = data, aes(x = Hb.mass.kg..g...kg., y = HB, color = Altitude)) +
+ggplot(data = data, aes(x = Hb.mass.kg..g...kg., y = HB, color = Age_categorie_binaire)) +
   geom_point()
 ```
 
@@ -72,21 +72,17 @@ check_outliers(mod)
 ```
 
 ```{r}
-data$rank_HB <- rank(data$HB)
-data$rank_HBMASS <- rank(data$Hb.mass.kg..g...kg.)
+data_12ans = data[data$Age_categorie_binaire == "8-12 ans", ]
+data_12ans$Rang_HB <- rank(data_12ans$HB)
+data_12ans$Rang_HBMASS <- rank(data_12ans$Hb.mass.kg..g...kg.)
 
-ggplot(data, aes(x = rank_HBMASS, y = rank_HB)) +
+ggplot(data_12ans, aes(x = Rang_HBMASS, y = Rang_HB, color = Ville_eval)) +
   geom_point() +
   geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
   labs(title = "Comparaison des rangs HB vs HBMASS")
 ```
 
-```{r}
-ggplot(data, aes(x = Hb.mass.kg..g...kg., y = HB)) +
-  geom_point() +
-  geom_smooth(method = "lm", se = FALSE) +
-  labs(title = "Relation entre HB et HBMASS")
-```
+
 
 ```{r}
 data$ecart <- data$rank_HB - data$rank_HBMASS
@@ -104,17 +100,112 @@ mod3 = lm(HB ~ Hb.mass.kg..g...kg. + PV..kg..ml.kg. + Altitude, data = data)
 mod4 = lm(HB ~ Hb.mass.kg..g...kg. * Altitude + PV..kg..ml.kg. * Altitude, data = data)
 mod5 = lm(HB ~ Hb.mass.kg..g...kg. * Altitude + PV..kg..ml.kg. * Altitude * Sexe_F_Fille_G_Garçon, data = data)
 models = list(mod1, mod2, mod3, mod4, mod5)
-modelsummary(models, stars = T, statistic = NULL)
 ```
 
 ```{r}
-#R2 Adj.	0.291	0.870	0.900	0.920	0.923
-mod1 = lm(HB ~ Hb.mass..g., data = data)
-mod2 = lm(HB ~ Hb.mass..g. + PV.ml. , data = data)
-mod3 = lm(HB ~ Hb.mass..g. + PV.ml. + Altitude, data = data)
-mod4 = lm(HB ~ Hb.mass..g. * Altitude + PV.ml. * Altitude, data = data)
-mod5 = lm(HB ~ Hb.mass..g. * Altitude + PV.ml. * Altitude * Sexe_F_Fille_G_Garçon, data = data)
-models = list(mod1, mod2, mod3, mod4, mod5)
-modelsummary(models, stars = T, statistic = NULL)
+data = read.csv("data/datafinal.csv")
+data = data[data$Age_categorie_binaire == "8-12 ans", ]
+
+mod1 = lm(HB ~ Hb.mass.kg..g...kg., data = data)
+mod2 = lm(HB ~ Hb.mass.kg..g...kg. + PV..kg..ml.kg. , data = data)
+
+label_models_r2adj <- function(models, prefix = "") {
+  # Calcule le R² ajusté et formate le nom
+  model_names <- sapply(seq_along(models), function(i) {
+    r2_adj <- summary(models[[i]])$adj.r.squared
+    sprintf("%s %d (R² adj = %.3f)", prefix, i, r2_adj)
+  })
+  # Renvoie une liste nommée
+  names(models) <- model_names
+  return(models)
+}
+
+models <- list(mod1, mod2, mod3, mod4, mod5)
+models <- label_models_r2adj(models)
+
+coef_data <- bind_rows(lapply(seq_along(models), function(i) {
+  tidy(models[[i]], conf.int = TRUE) %>%
+    mutate(model = names(models)[i])  # ✅ utilise les noms renommés
+}))
+
+term_order <- coef_data %>%
+  group_by(term) %>%
+  summarise(n_models = n_distinct(model)) %>%
+  arrange(-n_models) %>%
+  pull(term)
+
+# Réordonner les termes selon la fréquence croissante
+coef_data <- coef_data %>%
+  mutate(term = factor(term, levels = term_order))
+
+# Ajouter colonne de significativité (IC ne contenant pas 0)
+coef_data <- coef_data %>%
+  filter(term != "(Intercept)") %>%  # Enlever intercept si souhaité
+  mutate(significant = ifelse(conf.low > 0 | conf.high < 0, "Oui", "Non"))
+
+# Tracer le graphique
+ggplot(coef_data, aes(x = estimate, y = term, color = model, shape = significant)) +
+  geom_point(position = position_dodge(width = 0.6), size = 3) +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high),
+                 height = 0.2, position = position_dodge(width = 0.6)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
+  labs(x = "Coefficient estimé", y = "Variable explicative",
+       color = "Modèle", shape = "Significatif ?") +
+  scale_shape_manual(values = c("Non" = 7, "Oui" = 15)) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
 ```
 
+```{r}
+data = read.csv("data/datafinal.csv")
+data = data[data$Age_categorie_binaire == "8-12 ans", ]
+
+mod1 = lm(HB ~ Hb.mass..g., data = data)
+mod2 = lm(HB ~ Hb.mass..g. + PV.ml. , data = data)
+
+label_models_r2adj <- function(models, prefix = "") {
+  # Calcule le R² ajusté et formate le nom
+  model_names <- sapply(seq_along(models), function(i) {
+    r2_adj <- summary(models[[i]])$adj.r.squared
+    sprintf("%s %d (R² adj = %.2f)", prefix, i, r2_adj)
+  })
+  # Renvoie une liste nommée
+  names(models) <- model_names
+  return(models)
+}
+
+models <- list(mod1, mod2)
+models <- label_models_r2adj(models)
+
+coef_data <- bind_rows(lapply(seq_along(models), function(i) {
+  tidy(models[[i]], conf.int = TRUE) %>%
+    mutate(model = names(models)[i])  # ✅ utilise les noms renommés
+}))
+
+term_order <- coef_data %>%
+  group_by(term) %>%
+  summarise(n_models = n_distinct(model)) %>%
+  arrange(-n_models) %>%
+  pull(term)
+
+# Réordonner les termes selon la fréquence croissante
+coef_data <- coef_data %>%
+  mutate(term = factor(term, levels = term_order))
+
+# Ajouter colonne de significativité (IC ne contenant pas 0)
+coef_data <- coef_data %>%
+  filter(term != "(Intercept)") %>%  # Enlever intercept si souhaité
+  mutate(significant = ifelse(conf.low > 0 | conf.high < 0, "Oui", "Non"))
+
+# Tracer le graphique
+ggplot(coef_data, aes(x = estimate, y = term, color = model, shape = significant)) +
+  geom_point(position = position_dodge(width = 0.6), size = 3) +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high),
+                 height = 0.2, position = position_dodge(width = 0.6)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
+  labs(x = "Coefficient estimé", y = "Variable explicative",
+       color = "Modèle", shape = "Significatif ?") +
+  scale_shape_manual(values = c("Non" = 7, "Oui" = 15)) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```

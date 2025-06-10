@@ -1,0 +1,128 @@
+```{r}
+library(dplyr)
+library(tidyr)
+library(modelsummary)
+library(glue)
+library(gt)
+library(car)
+library(dunn.test)
+library(rcompanion)
+library(rstatix)
+library(purrr)
+library(ggplot2)
+library(patchwork)
+library(psych)
+library(performance)
+library(lmtest)
+library(readxl)
+library(openxlsx)
+library(pheatmap)
+library(randomForest)
+```
+
+```{r}
+diag = read.csv("data/datafinal.csv")
+nutri = read.csv("data/nutri.csv")
+diag = diag[,-c(1,3)]
+```
+
+```{r}
+nutri = read.csv("data/nutri.csv")
+full = read.csv("data/datafinal.csv")
+data = left_join(full, nutri, by = c("Code_Sujet", "Age_categorie_binaire"))
+data <- data[data$Age_categorie_binaire == "8-12 ans",]
+data_subset <- data %>%
+  select(HB, HCT.., Hb.mass.kg..g...kg., Anemie_OMS2024, Polyglobulie_14.5_OMS2024, Pr..g., L.g., G.g., Fibres, Calcium.....mg., Fer..mg.100.g., Zinc..mg.100.g., Vitamine.C..mg.)
+data_subset_all <- na.omit(data_subset)
+data_subset_all$Anemie_OMS2024 <- ifelse(data_subset_all$Anemie_OMS2024 == "oui", 1, 0)
+data_subset_all$Polyglobulie_14.5_OMS2024 <- ifelse(data_subset_all$Polyglobulie_14.5_OMS2024 == "oui", 1, 0)
+
+var1 = names(data_subset_all[,-c(1, 2, 3)])
+
+for (i in var1) {
+  formule <- as.formula(paste("HB ~", i))
+  mod = lm(formule, data = data)
+  print(summary(mod))
+}
+for (i in var1) {
+  formule <- as.formula(paste("HCT.. ~", i))
+  mod = lm(formule, data = data)
+  print(summary(mod))
+}
+for (i in var1) {
+  formule <- as.formula(paste("Hb.mass.kg..g...kg. ~", i))
+  mod = lm(formule, data = data)
+  print(summary(mod))
+}
+
+
+mod1 = lm(HB ~ ., data = data_subset_all[,-c(2, 3)])
+mod2 = lm(HCT.. ~ ., data = data_subset_all[,-c(1, 3)])
+mod3 = lm(Hb.mass.kg..g...kg. ~ ., data = data_subset_all[,-c(1, 2)])
+
+summary(mod1)
+summary(mod2)
+summary(mod3)
+```
+
+```{r}
+data = left_join(diag, nutri, by = c("Code_Sujet", "Age_categorie_binaire"))
+data <- data[data$Age_categorie_binaire == "0-3 ans",]
+data <- data[, !grepl("Hbmass", names(data), ignore.case = TRUE)]
+data_subset <- data %>%
+  select(HB, HCT.., Pr..g., L.g., G.g., Fibres, Calcium.....mg., Fer..mg.100.g., Zinc..mg.100.g., Vitamine.C..mg.)
+data_subset_all <- na.omit(data_subset)
+
+var1 = names(data_subset_all[,-c(1, 2)])
+
+for (i in var1) {
+  formule <- as.formula(paste("HB ~", i))
+  mod = lm(formule, data = data)
+  print(summary(mod))
+}
+
+for (i in var1) {
+  formule <- as.formula(paste("HCT.. ~", i))
+  mod = lm(formule, data = data)
+  print(summary(mod))
+}
+  
+mod1 = lm(HB ~ ., data = data_subset_all[,-2])
+mod2 = lm(HCT.. ~ ., data = data_subset_all[,-1])
+
+summary(mod1)
+summary(mod2)
+```
+
+```{r}
+data = left_join(diag, nutri, by = c("Code_Sujet", "Age_categorie_binaire"))
+data_subset <- data %>%
+  select(HB, HCT.., Hb.mass.kg..g...kg., Pr..g., L.g., G.g., Fibres, Calcium.....mg., Fer..mg.100.g., Zinc..mg.100.g., Vitamine.C..mg.)
+data_subset_all <- na.omit(data_subset)
+
+var1 = names(data_subset_all[,-c(1, 2, 3)])
+
+for (i in var1) {
+  formule <- as.formula(paste("HB ~", i))
+  mod = lm(formule, data = data)
+  print(summary(mod))
+}
+for (i in var1) {
+  formule <- as.formula(paste("HCT.. ~", i))
+  mod = lm(formule, data = data)
+  print(summary(mod))
+}
+for (i in var1) {
+  formule <- as.formula(paste("Hb.mass.kg..g...kg. ~", i))
+  mod = lm(formule, data = data)
+  print(summary(mod))
+}
+
+mod1 = lm(HB ~ ., data = data_subset_all[,-c(2, 3)])
+mod2 = lm(HCT.. ~ ., data = data_subset_all[,-c(1, 3)])
+mod3 = lm(Hb.mass.kg..g...kg. ~ ., data = data_subset_all[,-c(1, 2)])
+
+summary(mod1)
+summary(mod2)
+summary(mod3)
+```

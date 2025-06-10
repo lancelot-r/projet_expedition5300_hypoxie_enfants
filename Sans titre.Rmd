@@ -42,10 +42,10 @@ data <- data %>%
   ))
 data <- data %>%
   mutate(Ville_eval = case_when(
+    Ville_eval == "Lima (150m)" ~ "Lima",
     Ville_eval == "Cusco (3400m)" ~ "Cusco",
     Ville_eval == "Juliaca (3800m)" ~ "Juliaca",
-    Ville_eval == "La Rinconada (5100m-5300m)" ~ "Rinconada",
-    Ville_eval == "Lima (150m)" ~ "Lima"
+    Ville_eval == "La Rinconada (5100m-5300m)" ~ "Rinconada"
   ))
 data$Sexe_F_Fille_G_Garçon = as.factor(data$Sexe_F_Fille_G_Garçon)
 data$Hb.mass.kg..g...kg.2 = as.numeric(data$Hb.mass.kg..g...kg.2)
@@ -78,6 +78,8 @@ variables_qual <- data_3ans %>%
   select(where(~ is.character(.) || is.factor(.)) & where(~ !all(is.na(.)))) %>%
   names()
 variables_qual <- variables_qual[-c(1, 3)]
+
+ordre_villes <- c("Lima", "Cusco", "Juliaca", "Rinconada")  # Remplacez par l'ordre souhaité
 
 # === Résumé pour variables quantitatives ===
 quant_table <- data_3ans %>%
@@ -112,7 +114,8 @@ qual_table <- data_3ans %>%
 
 # === Fusion des deux tableaux ===
 summary_table <- bind_rows(quant_table, qual_table) %>%
-  pivot_wider(names_from = Ville_eval, values_from = summary_str)
+  pivot_wider(names_from = Ville_eval, values_from = summary_str)%>%
+  select(variable, all_of(ordre_villes))
 
 get_global_pvals <- function(df, vars, group = "Ville_eval") {
   pvals <- sapply(vars, function(var) {
@@ -238,7 +241,7 @@ final_table <- summary_table %>%
   left_join(signif_df, by = "variable")
 
 # Boucle explicite pour concaténer les logos aux colonnes par ville
-for (ville in villes) {
+for (ville in ordre_villes) {  # <- utilise l'ordre défini
   col_logo <- paste0(ville, "_logo")
   if (col_logo %in% colnames(final_table)) {
     final_table[[ville]] <- paste0(final_table[[ville]], " ", final_table[[col_logo]])
@@ -310,7 +313,8 @@ qual_table <- data_12ans %>%
 
 # === Fusion des deux tableaux ===
 summary_table <- bind_rows(quant_table, qual_table) %>%
-  pivot_wider(names_from = Ville_eval, values_from = summary_str)
+  pivot_wider(names_from = Ville_eval, values_from = summary_str)%>%
+  select(variable, all_of(ordre_villes))
 
 
 # === 3. Construction du tableau de logos pour toutes les variables ===
@@ -332,7 +336,7 @@ final_table <- summary_table %>%
   left_join(signif_df, by = "variable")
 
 # Boucle explicite pour concaténer les logos aux colonnes par ville
-for (ville in villes) {
+for (ville in ordre_villes) {  # <- utilise l'ordre défini
   col_logo <- paste0(ville, "_logo")
   if (col_logo %in% colnames(final_table)) {
     final_table[[ville]] <- paste0(final_table[[ville]], " ", final_table[[col_logo]])
@@ -828,6 +832,6 @@ chisq.test(data_12ans$Polyglobulie_Q90, data_12ans$Ville_eval)
 
 ```{r}
 data <- data %>%
-  select(Code_Sujet, Ville_eval, Age_categorie_binaire, Age_mois, Anemie_OMS2011, Anemie_OMS2024, Anemie_SD, Anemie_2SD, Anemie_Q10, Anemie_2SD_Hbmass_kg, Anemie_Q10_Hbmass, Polyglobulie_14.5_OMS2011, Polyglobulie_14.5_OMS2024, Polyglobulie_SD, Polyglobulie_2SD, Polyglobulie_Q90, Polyglobulie_SD_Hbmass_kg, Polyglobulie_2SD_Hbmass_kg, Polyglobulie_Q90_Hbmass)
+  select(Code_Sujet, Ville_eval, Age_categorie_binaire, Age_mois, Anemie_OMS2011, Anemie_OMS2024, Anemie_SD, Anemie_2SD, Anemie_Q10, Anemie_SD_Hbmass_kg, Anemie_2SD_Hbmass_kg, Anemie_Q10_Hbmass, Polyglobulie_14.5_OMS2011, Polyglobulie_14.5_OMS2024, Polyglobulie_SD, Polyglobulie_2SD, Polyglobulie_Q90, Polyglobulie_SD_Hbmass_kg, Polyglobulie_2SD_Hbmass_kg, Polyglobulie_Q90_Hbmass)
 ```
 

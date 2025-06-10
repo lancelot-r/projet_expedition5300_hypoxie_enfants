@@ -1,3 +1,8 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
 ```{r}
 library(dplyr)
 library(tidyr)
@@ -111,4 +116,209 @@ varImpPlot(mod1)
 varImpPlot(mod2)
 ```
 
+```{r}
+diag = read.csv("data/datafinal.csv")
+nutri = read.csv("data/nutri.csv")
+diag = diag[,-c(1,3)]
+data = left_join(diag, nutri, by = c("Code_Sujet", "Age_categorie_binaire"))
+data <- data[data$Age_categorie_binaire == "0-3 ans",]
+data <- data[, !grepl("Hbmass", names(data), ignore.case = TRUE)]
+data_subset <- data %>%
+  select(HB, HCT.., Pr..g., L.g., G.g., Fibres, Calcium.....mg., Fer..mg.100.g., Zinc..mg.100.g., Vitamine.C..mg.)
+data_subset_all <- na.omit(data_subset)
 
+mod1 = lm(HB ~ ., data = data_subset_all[,-2])
+mod2 = lm(HCT.. ~ ., data = data_subset_all[,-1])
+
+models = list(mod1, mod2)
+```
+
+```{r}
+label_models_r2adj <- function(models, prefix = "") {
+  model_names <- sapply(seq_along(models), function(i) {
+    r2_adj <- summary(models[[i]])$adj.r.squared
+    
+    # Extraire la variable expliquée automatiquement
+    response_var <- all.vars(formula(models[[i]]))[1]
+    
+    # Construire le nom : Variable ~ (R² adj = ...)
+    sprintf("%s ~ (R² adj = %.3f)", response_var, r2_adj)
+  })
+  
+  names(models) <- model_names
+  return(models)
+}
+
+models <- label_models_r2adj(models)
+
+coef_data <- bind_rows(lapply(seq_along(models), function(i) {
+  tidy(models[[i]], conf.int = TRUE) %>%
+    mutate(model = names(models)[i])  # ✅ utilise les noms renommés
+}))
+
+term_order <- coef_data %>%
+  group_by(term) %>%
+  summarise(n_models = n_distinct(model)) %>%
+  arrange(n_models) %>%
+  pull(term)
+
+# Réordonner les termes selon la fréquence croissante
+coef_data <- coef_data %>%
+  mutate(term = factor(term, levels = term_order))
+
+# Ajouter colonne de significativité (IC ne contenant pas 0)
+coef_data <- coef_data %>%
+  filter(term != "(Intercept)") %>%  # Enlever intercept si souhaité
+  mutate(significant = ifelse(conf.low > 0 | conf.high < 0, "Oui", "Non"))
+
+# Tracer le graphique
+ggplot(coef_data, aes(x = estimate, y = term, color = model, shape = significant)) +
+  geom_point(position = position_dodge(width = 0.6), size = 3) +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high),
+                 height = 0.2, position = position_dodge(width = 0.6)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
+  labs(x = "Coefficient estimé", y = "Variable explicative",
+       color = "Modèle", shape = "Significatif ?") +
+  scale_shape_manual(values = c("Non" = 7, "Oui" = 15)) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+
+```{r}
+mod_HB_1 <- lm(HB ~ Pr..g., data = data_subset_all[,-2])
+mod_HB_2 <- lm(HB ~ L.g., data = data_subset_all[,-2])
+mod_HB_3 <- lm(HB ~ G.g., data = data_subset_all[,-2])
+mod_HB_4 <- lm(HB ~ Fibres, data = data_subset_all[,-2])
+mod_HB_5 <- lm(HB ~ Calcium.....mg., data = data_subset_all[,-2])
+mod_HB_6 <- lm(HB ~ Fer..mg.100.g., data = data_subset_all[,-2])
+mod_HB_7 <- lm(HB ~ Zinc..mg.100.g., data = data_subset_all[,-2])
+mod_HB_8 <- lm(HB ~ Vitamine.C..mg., data = data_subset_all[,-2])
+mod_HCT_1 <- lm(HCT.. ~ Pr..g., data = data_subset_all[,-1])
+mod_HCT_2 <- lm(HCT.. ~ L.g., data = data_subset_all[,-1])
+mod_HCT_3 <- lm(HCT.. ~ G.g., data = data_subset_all[,-1])
+mod_HCT_4 <- lm(HCT.. ~ Fibres, data = data_subset_all[,-1])
+mod_HCT_5 <- lm(HCT.. ~ Calcium.....mg., data = data_subset_all[,-1])
+mod_HCT_6 <- lm(HCT.. ~ Fer..mg.100.g., data = data_subset_all[,-1])
+mod_HCT_7 <- lm(HCT.. ~ Zinc..mg.100.g., data = data_subset_all[,-1])
+mod_HCT_8 <- lm(HCT.. ~ Vitamine.C..mg., data = data_subset_all[,-1])
+```
+
+```{r}
+models <- list(
+  mod_HB_1, mod_HB_2, mod_HB_3, mod_HB_4,
+  mod_HB_5, mod_HB_6, mod_HB_7, mod_HB_8
+)
+
+label_models_r2adj <- function(models, prefix = "") {
+  model_names <- sapply(seq_along(models), function(i) {
+    mod <- models[[i]]
+    
+    # Extraire la variable expliquée (à droite de ~)
+    response_var <- all.vars(formula(mod))[2]
+    
+    # Calculer la p-value du test de Fisher global
+    fstat <- summary(mod)$fstatistic
+    p_value <- pf(fstat[1], fstat[2], fstat[3], lower.tail = FALSE)
+
+    # Construire le nom : Variable ~ (R² adj = ..., p = ...)
+    sprintf("%s%s ~ (F.pval = %.2f)", prefix, response_var , p_value)
+  })
+  
+  names(models) <- model_names
+  return(models)
+}
+
+
+models <- label_models_r2adj(models)
+
+coef_data <- bind_rows(lapply(seq_along(models), function(i) {
+  tidy(models[[i]], conf.int = TRUE) %>%
+    mutate(model = names(models)[i])  # ✅ utilise les noms renommés
+}))
+
+term_order <- coef_data %>%
+  group_by(term) %>%
+  summarise(n_models = n_distinct(model)) %>%
+  arrange(n_models) %>%
+  pull(term)
+
+# Réordonner les termes selon la fréquence croissante
+coef_data <- coef_data %>%
+  mutate(term = factor(term, levels = term_order))
+
+# Ajouter colonne de significativité (IC ne contenant pas 0)
+coef_data <- coef_data %>%
+  filter(term != "(Intercept)") %>%  # Enlever intercept si souhaité
+  mutate(significant = ifelse(conf.low > 0 | conf.high < 0, "Oui", "Non"))
+
+# Tracer le graphique
+ggplot(coef_data, aes(x = estimate, y = term, color = model, shape = significant)) +
+  geom_point(position = position_dodge(width = 0.6), size = 3) +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high),
+                 height = 0.2, position = position_dodge(width = 0.6)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
+  labs(x = "Coefficient estimé", y = "Variable explicative",
+       color = "Modèle", shape = "Significatif ?", title = "Modèles individuels : HB") +
+  scale_shape_manual(values = c("Non" = 7, "Oui" = 15)) +
+  theme_minimal()
+```
+
+```{r}
+models <- list(
+  mod_HCT_1, mod_HCT_2, mod_HCT_3, mod_HCT_4,
+  mod_HCT_5, mod_HCT_6, mod_HCT_7, mod_HCT_8
+)
+
+label_models_r2adj <- function(models, prefix = "") {
+  model_names <- sapply(seq_along(models), function(i) {
+    mod <- models[[i]]
+    
+    # Extraire la variable expliquée (à droite de ~)
+    response_var <- all.vars(formula(mod))[2]
+    
+    # Calculer la p-value du test de Fisher global
+    fstat <- summary(mod)$fstatistic
+    p_value <- pf(fstat[1], fstat[2], fstat[3], lower.tail = FALSE)
+
+    # Construire le nom : Variable ~ (R² adj = ..., p = ...)
+    sprintf("%s%s ~ (F.pval = %.2f)", prefix, response_var , p_value)
+  })
+  
+  names(models) <- model_names
+  return(models)
+}
+
+models <- label_models_r2adj(models)
+
+coef_data <- bind_rows(lapply(seq_along(models), function(i) {
+  tidy(models[[i]], conf.int = TRUE) %>%
+    mutate(model = names(models)[i])  # ✅ utilise les noms renommés
+}))
+
+term_order <- coef_data %>%
+  group_by(term) %>%
+  summarise(n_models = n_distinct(model)) %>%
+  arrange(n_models) %>%
+  pull(term)
+
+# Réordonner les termes selon la fréquence croissante
+coef_data <- coef_data %>%
+  mutate(term = factor(term, levels = term_order))
+
+# Ajouter colonne de significativité (IC ne contenant pas 0)
+coef_data <- coef_data %>%
+  filter(term != "(Intercept)") %>%  # Enlever intercept si souhaité
+  mutate(significant = ifelse(conf.low > 0 | conf.high < 0, "Oui", "Non"))
+
+# Tracer le graphique
+ggplot(coef_data, aes(x = estimate, y = term, color = model, shape = significant)) +
+  geom_point(position = position_dodge(width = 0.6), size = 3) +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high),
+                 height = 0.2, position = position_dodge(width = 0.6)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
+  labs(x = "Coefficient estimé", y = "Variable explicative",
+       color = "Modèle", shape = "Significatif ?", title = "Modèles individuels : HCT..") +
+  scale_shape_manual(values = c("Non" = 7, "Oui" = 15)) +
+  theme_minimal()
+```
