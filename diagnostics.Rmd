@@ -134,6 +134,257 @@ ggplot(data_long, aes(x = Ville_eval, y = Résultat_bin * 100, fill = Ville_eval
 ```
 
 ```{r}
+# Lecture et filtrage des données
+data <- read.csv("data/diags.csv")
+data <- data[data$Age_categorie_binaire == "8-12 ans", ]
+data = data[, -c(10,11,12,13)]
+data$Ville_eval <- factor(data$Ville_eval,
+  levels = c("Lima", "Cusco", "Juliaca", "Rinconada"),
+  labels = c("Lima (150m)", "Cusco (3400m)", "Juliaca (3800m)", "La Rinconada (5100m)")
+)
+
+# Mise en format long
+data_long <- data %>%
+  pivot_longer(
+    cols = starts_with("Anemie_"),
+    names_to = "Méthode",
+    values_to = "Résultat"
+  ) %>%
+  mutate(
+    Résultat_bin = ifelse(Résultat == "oui", 1, 0),
+    Type = "Anémie"
+  )
+
+ordre_methodes_raw <- c("Anemie_OMS2011", "Anemie_OMS2024", "Anemie_SD", "Anemie_2SD", "Anemie_SD_Hbmass_kg", "Anemie_2SD_Hbmass_kg")
+ordre_methodes_clean <- gsub("Anemie_", "", ordre_methodes_raw)
+
+data_long <- data_long %>%
+  mutate(
+    Méthode = factor(gsub("Anemie_", "", Méthode), levels = ordre_methodes_clean)
+  )
+
+# Prévalence par ville et méthode
+prevalence <- data_long %>%
+  group_by(Ville_eval, Méthode) %>%
+  summarise(
+    Prevalence = mean(Résultat_bin, na.rm = TRUE) * 100,
+    .groups = "drop"
+  )
+
+# Tests globaux (par ville)
+global_tests_ville <- data_long %>%
+  group_by(Ville_eval) %>%
+  summarise(
+    p_global = {
+      tbl <- table(Méthode, Résultat_bin)
+      if (any(tbl < 5)) fisher.test(tbl, simulate.p.value = T)$p.value else chisq.test(tbl)$p.value
+    },
+    .groups = "drop"
+  )
+
+# Paires de méthodes
+method_pairs <- combn(unique(data_long$Méthode), 2, simplify = FALSE)
+
+# Comparaisons par ville entre méthodes
+all_pvals_methode <- lapply(unique(data_long$Ville_eval), function(ville) {
+  data_sub <- data_long %>% filter(Ville_eval == ville)
+  
+  lapply(method_pairs, function(pair) {
+    m1 <- pair[1]
+    m2 <- pair[2]
+    
+    sub_pair <- data_sub %>% filter(Méthode %in% pair)
+    
+    tbl <- table(sub_pair$Méthode, sub_pair$Résultat_bin)
+    
+    p_val <- if (any(tbl < 5)) fisher.test(tbl)$p.value else chisq.test(tbl)$p.value
+    
+    tibble(
+      Ville_eval = ville,
+      group1 = m1,
+      group2 = m2,
+      p = p_val
+    )
+  }) %>% bind_rows()
+}) %>% bind_rows()
+
+# Annotation de significativité
+p_values_methods <- all_pvals_methode %>%
+  mutate(
+    p.signif = case_when(
+      p < 0.001 ~ "***",
+      p < 0.01  ~ "**",
+      p < 0.05  ~ "*",
+      TRUE      ~ "ns"
+    )
+  ) %>%
+  left_join(global_tests_ville, by = "Ville_eval") %>%
+  filter(p_global < 0.05)
+
+# Position Y pour annotation
+max_prev_ville <- prevalence %>%
+  group_by(Ville_eval) %>%
+  summarise(maxY = max(Prevalence))
+
+p_values_methods <- p_values_methods %>%
+  left_join(max_prev_ville, by = "Ville_eval") %>%
+  group_by(Ville_eval) %>%
+  mutate(y.position = maxY + 5 + 5 * row_number()) %>%
+  ungroup()
+p_values_methods <- p_values_methods %>%
+  filter(p.signif != "ns")
+# Graphique final
+ggplot(data_long, aes(x = Méthode, y = Résultat_bin * 100, fill = Méthode)) +
+  stat_summary(fun = mean, geom = "bar", position = position_dodge(width = 0.8)) +
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.2, position = position_dodge(width = 0.8)) +
+  stat_pvalue_manual(
+    data = p_values_methods,
+    label = "p.signif",
+    y.position = "y.position",
+    xmin = "group1",
+    xmax = "group2",
+    tip.length = 0.01,
+    bracket.size = 0.6,
+    inherit.aes = FALSE
+  ) +
+  facet_wrap(~ Ville_eval, scales = "free_y") +
+  labs(
+    title = "",
+    x = "Méthode de détection",
+    y = "Prévalence (%)",
+    fill = "Méthode"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+# Lecture et filtrage des données
+data <- read.csv("data/diags.csv")
+data <- data[data$Age_categorie_binaire == "0-3 ans", ]
+data <- data[, -c(10,11,12,13)]
+
+data$Ville_eval <- factor(data$Ville_eval,
+  levels = c("Lima", "Cusco", "Juliaca", "Rinconada"),
+  labels = c("Lima (150m)", "Cusco (3400m)", "Juliaca (3800m)", "La Rinconada (5100m)")
+)
+
+# Mise en format long
+data_long <- data %>%
+  pivot_longer(
+    cols = starts_with("Anemie_"),
+    names_to = "Méthode",
+    values_to = "Résultat"
+  ) %>%
+  mutate(
+    Résultat_bin = ifelse(Résultat == "oui", 1, 0),
+    Type = "Anémie"
+  )
+
+ordre_methodes_raw <- c("Anemie_OMS2024", "Anemie_OMS2011", "Anemie_SD", "Anemie_2SD")
+ordre_methodes_clean <- gsub("Anemie_", "", ordre_methodes_raw)
+
+data_long <- data_long %>%
+  mutate(
+    Méthode = factor(gsub("Anemie_", "", Méthode), levels = ordre_methodes_clean)
+  )
+
+# Prévalence par ville et méthode
+prevalence <- data_long %>%
+  group_by(Ville_eval, Méthode) %>%
+  summarise(
+    Prevalence = mean(Résultat_bin, na.rm = TRUE) * 100,
+    .groups = "drop"
+  )
+
+# Tests globaux (par ville)
+global_tests_ville <- data_long %>%
+  group_by(Ville_eval) %>%
+  summarise(
+    p_global = {
+      tbl <- table(Méthode, Résultat_bin)
+      if (any(tbl < 5)) fisher.test(tbl)$p.value else chisq.test(tbl)$p.value
+    },
+    .groups = "drop"
+  )
+
+# Paires de méthodes
+method_pairs <- combn(unique(data_long$Méthode), 2, simplify = FALSE)
+
+# Comparaisons par ville entre méthodes
+all_pvals_methode <- lapply(unique(data_long$Ville_eval), function(ville) {
+  data_sub <- data_long %>% filter(Ville_eval == ville)
+  
+  lapply(method_pairs, function(pair) {
+    m1 <- pair[1]
+    m2 <- pair[2]
+    
+    sub_pair <- data_sub %>% filter(Méthode %in% pair)
+    
+    tbl <- table(sub_pair$Méthode, sub_pair$Résultat_bin)
+    
+    p_val <- if (any(tbl < 5)) fisher.test(tbl)$p.value else chisq.test(tbl)$p.value
+    
+    tibble(
+      Ville_eval = ville,
+      group1 = m1,
+      group2 = m2,
+      p = p_val
+    )
+  }) %>% bind_rows()
+}) %>% bind_rows()
+
+# Annotation de significativité
+p_values_methods <- all_pvals_methode %>%
+  mutate(
+    p.signif = case_when(
+      p < 0.001 ~ "***",
+      p < 0.01  ~ "**",
+      p < 0.05  ~ "*",
+      TRUE      ~ "ns"
+    )
+  ) %>%
+  left_join(global_tests_ville, by = "Ville_eval") %>%
+  filter(p_global < 0.05)
+
+# Position Y pour annotation
+max_prev_ville <- prevalence %>%
+  group_by(Ville_eval) %>%
+  summarise(maxY = max(Prevalence))
+
+p_values_methods <- p_values_methods %>%
+  left_join(max_prev_ville, by = "Ville_eval") %>%
+  group_by(Ville_eval) %>%
+  mutate(y.position = maxY + 5 + 5 * row_number()) %>%
+  ungroup()
+p_values_methods <- p_values_methods %>%
+  filter(p.signif != "ns")
+# Graphique final
+ggplot(data_long, aes(x = Méthode, y = Résultat_bin * 100, fill = Méthode)) +
+  stat_summary(fun = mean, geom = "bar", position = position_dodge(width = 0.8)) +
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.2, position = position_dodge(width = 0.8)) +
+  stat_pvalue_manual(
+    data = p_values_methods,
+    label = "p.signif",
+    y.position = "y.position",
+    xmin = "group1",
+    xmax = "group2",
+    tip.length = 0.01,
+    bracket.size = 0.6,
+    inherit.aes = FALSE
+  ) +
+  facet_wrap(~ Ville_eval, scales = "free_y") +
+  labs(
+    title = "",
+    x = "Méthode de détection",
+    y = "Prévalence (%)",
+    fill = "Méthode"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
 data = read.csv("data/diags.csv")
 data = data[data$Age_categorie_binaire == "0-3 ans", ]
 data = data[, -c(19,20,21)]
@@ -682,14 +933,35 @@ pairwise_fisher_test(table(df_expanded_12p), p.adjust.method = "holm")
 ```
 
 ```{r}
-cohen1 <- cohen.kappa(data_3ans[,c("Anemie_OMS2011", "Anemie_OMS2024", "Anemie_SD", "Anemie_2SD", "Anemie_Q10")])
-cohen2 <- cohen.kappa(data_3ans[,c("Polyglobulie_14.5_OMS2011", "Polyglobulie_14.5_OMS2024", "Polyglobulie_SD", "Polyglobulie_2SD", "Polyglobulie_Q90")])
-cohen3 <- cohen.kappa(data_12ans[,c("Anemie_OMS2011", "Anemie_OMS2024", "Anemie_SD", "Anemie_2SD", "Anemie_Q10", "Anemie_SD_Hbmass_kg", "Anemie_2SD_Hbmass_kg", "Anemie_Q10_Hbmass")])
-cohen4 <- cohen.kappa(data_12ans[,c("Polyglobulie_14.5_OMS2011", "Polyglobulie_14.5_OMS2024", "Polyglobulie_SD", "Polyglobulie_2SD", "Polyglobulie_Q90", "Polyglobulie_SD_Hbmass_kg", "Polyglobulie_2SD_Hbmass_kg", "Polyglobulie_Q90_Hbmass")])
+data = read.csv("data.csv")
+data_3ans = data[data$Age_categorie_binaire == "0-3 ans",]
+data_12ans = data[data$Age_categorie_binaire == "8-12 ans",]
+data_kappa_3ans <- data_3ans %>%
+  select(
+    "OMS 2011" = Anemie_OMS2011,
+    "OMS 2024" = Anemie_OMS2024,
+    "Hb < -1 SD" = Anemie_SD,
+    "Hb < -2 SD" = Anemie_2SD
+)
+
+cohen1 <- cohen.kappa(data_kappa_3ans)
+
+data_kappa_12ans <- data_12ans %>%
+  select(
+    "OMS 2011" = Anemie_OMS2011,
+    "OMS 2024" = Anemie_OMS2024,
+    "Hb < -1 SD" = Anemie_SD,
+    "Hb < -2 SD" = Anemie_2SD,
+    "Hbmass < -1 SD" = Anemie_SD_Hbmass_kg,
+    "Hbmass < -2 SD" = Anemie_2SD_Hbmass_kg
+)
+
+cohen3 <- cohen.kappa(data_kappa_12ans)
 ```
 
 ```{r}
-pheatmap(cohen1$cohen.kappa, display_numbers = T)
+pheatmap(cohen3$cohen.kappa, display_numbers = T, cluster_rows = FALSE,
+cluster_cols = FALSE)
 ```
 
 ```{r}

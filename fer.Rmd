@@ -1,0 +1,573 @@
+---
+title: "Untitled"
+author: "Lancelot Ravier"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+editor_options:
+  chunk_output_type: console
+---
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(modelsummary)
+library(glue)
+library(gt)
+library(car)
+library(dunn.test)
+library(rcompanion)
+library(rstatix)
+library(purrr)
+library(ggplot2)
+library(patchwork)
+library(psych)
+library(performance)
+library(lmtest)
+library(readxl)
+library(openxlsx)
+library(pheatmap)
+```
+
+
+
+```{r}
+# === Variables à tracer ===
+mes_vars <- c("Indice.hémolyse", "CRP",
+"FER", "FERRITINE", "TRANSFERINE", "RECEPTEUR.TRANSFERINE", "PROGESTERONE", "OESTRADIOL")
+
+
+# === Catégories d'âge à boucler ===
+ages <- c("0-3 ans")
+
+# === Chargement de la base ===
+data_all <- read.csv("fer.csv")
+
+data_all$RECEPTEUR.TRANSFERINE <- as.numeric(gsub("<", "", data_all$RECEPTEUR.TRANSFERINE))
+data_all$PROGESTERONE <- as.numeric(gsub("<", "", data_all$PROGESTERONE))
+data_all$OESTRADIOL <- as.numeric(gsub("<", "", data_all$OESTRADIOL))
+data_all$Ville_eval <- factor(data_all$Ville_eval,
+  levels = c("Lima (150m)", "Cusco (3400m)", "Juliaca (3800m)", "La Rinconada (5100m)")
+)
+
+# === Boucle sur les tranches d’âge ===
+for (categorie_age in ages) {
+  message("Traitement : ", categorie_age)
+
+  # Filtrage
+  data <- data_all %>% filter(Age_categorie_binaire == categorie_age)
+
+  # Long format
+  data_long <- data %>%
+    select(all_of(mes_vars), Ville_eval) %>%
+    pivot_longer(cols = all_of(mes_vars), names_to = "Variable", values_to = "Valeur")
+
+  # Tests post-hoc robustes
+  comparaisons <- data_long %>%
+    group_split(Variable) %>%
+    map_df(function(df) {
+      variable <- unique(df$Variable)
+      groupes_valides <- df %>%
+        group_by(Ville_eval) %>%
+        summarise(n = sum(!is.na(Valeur)), .groups = "drop") %>%
+        filter(n >= 2) %>%
+        nrow()
+      if (groupes_valides < 2) return(NULL)
+
+      tryCatch({
+        df %>%
+          pairwise_wilcox_test(
+            Valeur ~ Ville_eval,
+            p.adjust.method = "BH"
+          ) %>%
+          filter(p.adj < 0.1) %>%
+          mutate(
+            Variable = variable,
+            p.signif = case_when(
+              p.adj < 0.01 ~ "***",
+              p.adj < 0.05 ~ "**",
+              p.adj < 0.1  ~ "*"
+            )
+          )
+      }, error = function(e) NULL)
+    })
+
+  # Position des p-values
+  positions_max <- data_long %>%
+    group_by(Variable) %>%
+    summarise(base_y = max(Valeur, na.rm = TRUE), .groups = "drop")
+
+  comparaisons <- comparaisons %>%
+    left_join(positions_max, by = "Variable") %>%
+    group_by(Variable) %>%
+    mutate(
+      y.position = base_y + 0.1 * base_y + 0.05 * base_y * row_number()
+    ) %>%
+    ungroup()
+
+  # Génération du graphique
+  p <- ggplot(data_long, aes(x = Ville_eval, y = Valeur, fill = Ville_eval)) +
+    facet_wrap(~Variable, scales = "free_y", ncol = 3) +
+    geom_boxplot(alpha = 0.7, outlier.size = 0.5) +
+    stat_pvalue_manual(
+      data = comparaisons,
+      label = "p.signif",
+      y.position = "y.position",
+      xmin = "group1",
+      xmax = "group2",
+      tip.length = 0.01,
+      bracket.size = 0.6,
+      inherit.aes = FALSE
+    ) +
+    scale_fill_manual(values = c(
+      "Lima (150m)" = "#1b9e77",
+      "Cusco (3400m)" = "#d95f02",
+      "Juliaca (3800m)" = "#7570b3",
+      "La Rinconada (5100m)" = "#e7298a"
+    )) +
+    labs(
+      title = paste("Comparaison des distributions par ville (", categorie_age, ")"),
+      x = "Ville",
+      y = "Valeur",
+      fill = "Ville"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  print(p)
+}
+```
+
+```{r}
+# HB
+
+
+data = read.csv("fer.csv")
+data = data %>% select("Code_Sujet", "Indice.hémolyse", "CRP",
+"FER", "FERRITINE", "TRANSFERINE", "RECEPTEUR.TRANSFERINE", "PROGESTERONE", "OESTRADIOL")
+data$RECEPTEUR.TRANSFERINE <- as.numeric(gsub("<", "", data$RECEPTEUR.TRANSFERINE))
+data$PROGESTERONE <- as.numeric(gsub("<", "", data$PROGESTERONE))
+data$OESTRADIOL <- as.numeric(gsub("<", "", data$OESTRADIOL))
+
+data2 = read.csv("data.csv")
+
+data = left_join(data, data2, by = "Code_Sujet")
+data <- data %>%
+  filter(!is.na(Ville_eval))
+
+mes_vars <- c("Indice.hémolyse", "CRP",
+"FER", "FERRITINE", "TRANSFERINE", "RECEPTEUR.TRANSFERINE", "PROGESTERONE", "OESTRADIOL")
+
+data$Ville_eval <- factor(data$Ville_eval, levels = c("Lima (150m)", "Cusco (3400m)", "Juliaca (3800m)", "La Rinconada (5100m)"))
+data = data[data$Age_categorie_binaire == "0-3 ans",]
+# Fonction qui crée les modèles pour chaque niveau d'altitude
+models_by_altitude <- data %>%
+  group_by(Ville_eval) %>%
+  group_split() %>%
+  map(function(df) {
+list(
+  mod_Protéines = lm(HCT.. ~ Indice.hémolyse, data = df),
+  mod_Lipides   = lm(HCT.. ~ CRP, data = df),
+  mod_Glucides  = lm(HCT.. ~ FER, data = df),
+  mod_Fibres    = lm(HCT.. ~ FERRITINE, data = df),
+  mod_Calcium   = lm(HCT.. ~ TRANSFERINE, data = df),
+  mod_Fer       = lm(HCT.. ~ RECEPTEUR.TRANSFERINE, data = df),
+  #mod_Zinc      = lm(HCT.. ~ PROGESTERONE, data = df),
+  #mod_VitC      = lm(HCT.. ~ OESTRADIOL, data = df),
+  Ville_eval      = unique(df$Ville_eval)
+)
+  })
+
+coef_data <- map_df(models_by_altitude, function(mods) {
+  altitude <- mods$Ville_eval
+
+  # Extraire les coefficients de tous les modèles
+  bind_rows(
+    tidy(mods$mod_Protéines, conf.int = TRUE) %>% mutate(model = "Inhibition"),
+    tidy(mods$mod_Lipides, conf.int = TRUE) %>% mutate(model = "Supervision"),
+    tidy(mods$mod_Glucides, conf.int = TRUE) %>% mutate(model = "Flexibility"),
+    tidy(mods$mod_Fibres, conf.int = TRUE) %>% mutate(model = "Emotional Control"),
+    tidy(mods$mod_Calcium, conf.int = TRUE) %>% mutate(model = "Initiative"),
+    tidy(mods$mod_Fer, conf.int = TRUE) %>% mutate(model = "Memory-Work"),
+    #tidy(mods$mod_Zinc, conf.int = TRUE) %>% mutate(model = "Planification"),
+    #tidy(mods$mod_VitC, conf.int = TRUE) %>% mutate(model = "Supervision"),
+  ) %>% mutate(Ville_eval = altitude)
+})
+
+coef_data <- coef_data %>%
+  filter(term != "(Intercept)") %>%
+  mutate(significant = ifelse(conf.low > 0 | conf.high < 0, "Yes", "No"))
+
+coef_table_stars <- coef_data %>%
+  mutate(
+    stars = case_when(
+      p.value <= 0.01 ~ "***",
+      p.value <= 0.05 ~ "**",
+      p.value <= 0.1 ~ "*",
+      TRUE ~ ""
+    ),
+    fill_color = case_when(
+      (p.value <= 0.1 & estimate > 0) ~ "positif",
+      (p.value <= 0.1 & estimate < 0) ~ "négatif",
+      TRUE ~ "neutre"
+    )
+  ) %>%
+  select(Ville_eval, term, stars, fill_color)
+
+ggplot(coef_table_stars, aes(x = Ville_eval, y = term, fill = fill_color)) +
+geom_tile(color = "white") +
+geom_text(aes(label = stars), size = 5) +
+scale_fill_manual(
+  values = c("positif" = "#1b9e77", "négatif" = "red2", "neutre" = "#e0e0e0"),
+  guide = FALSE
+) +
+labs(
+  title = "Modèles simples : HCT.. ~ FER (0-3 ans)",
+  x = "Ville",
+  y = "Variable explicative"
+) +
+theme_minimal() +
+theme(
+  axis.text.x = element_text(angle = 20, hjust = 1),
+  panel.grid = element_blank()
+)
+```
+
+```{r}
+# PAPm
+
+
+data = read.csv("fer.csv")
+data = data %>% select("Code_Sujet", "Indice.hémolyse", "CRP",
+"FER", "FERRITINE", "TRANSFERINE", "RECEPTEUR.TRANSFERINE", "PROGESTERONE", "OESTRADIOL")
+data$RECEPTEUR.TRANSFERINE <- as.numeric(gsub("<", "", data$RECEPTEUR.TRANSFERINE))
+data$PROGESTERONE <- as.numeric(gsub("<", "", data$PROGESTERONE))
+data$OESTRADIOL <- as.numeric(gsub("<", "", data$OESTRADIOL))
+
+data2 = read.csv("data.csv")
+
+data = left_join(data, data2, by = "Code_Sujet")
+data <- data %>%
+  filter(!is.na(Ville_eval))
+
+mes_vars <- c("Indice.hémolyse", "CRP",
+"FER", "FERRITINE", "TRANSFERINE", "RECEPTEUR.TRANSFERINE", "PROGESTERONE", "OESTRADIOL")
+
+data$Ville_eval <- factor(data$Ville_eval, levels = c("Lima (150m)", "Cusco (3400m)", "Juliaca (3800m)", "La Rinconada (5100m)"))
+data = data[data$Age_categorie_binaire == "8-12 ans",]
+# Fonction qui crée les modèles pour chaque niveau d'altitude
+models_by_altitude <- data %>%
+  group_by(Ville_eval) %>%
+  group_split() %>%
+  map(function(df) {
+list(
+  mod = lm(PAPm ~ FER, data = df),
+  mod_Fibres    = lm(PAPm ~ FERRITINE, data = df),
+  mod_Calcium   = lm(PAPm ~ TRANSFERINE, data = df),
+  mod_Fer       = lm(PAPm ~ RECEPTEUR.TRANSFERINE, data = df),
+  Ville_eval      = unique(df$Ville_eval)
+)
+  })
+
+coef_data <- map_df(models_by_altitude, function(mods) {
+  altitude <- mods$Ville_eval
+
+  # Extraire les coefficients de tous les modèles
+  bind_rows(
+    tidy(mods$mod, conf.int = TRUE) %>% mutate(model = "ontrol"),
+    tidy(mods$mod_Fibres, conf.int = TRUE) %>% mutate(model = "Emotional Control"),
+    tidy(mods$mod_Calcium, conf.int = TRUE) %>% mutate(model = "Initiative"),
+    tidy(mods$mod_Fer, conf.int = TRUE) %>% mutate(model = "Memory-Work"),
+  ) %>% mutate(Ville_eval = altitude)
+})
+
+coef_data <- coef_data %>%
+  filter(term != "(Intercept)") %>%
+  mutate(significant = ifelse(conf.low > 0 | conf.high < 0, "Yes", "No"))
+
+coef_table_stars <- coef_data %>%
+  mutate(
+    stars = case_when(
+      p.value <= 0.01 ~ "***",
+      p.value <= 0.05 ~ "**",
+      p.value <= 0.1 ~ "*",
+      TRUE ~ ""
+    ),
+    fill_color = case_when(
+      (p.value <= 0.1 & estimate > 0) ~ "positif",
+      (p.value <= 0.1 & estimate < 0) ~ "négatif",
+      TRUE ~ "neutre"
+    )
+  ) %>%
+  select(Ville_eval, term, stars, fill_color)
+
+ggplot(coef_table_stars, aes(x = Ville_eval, y = term, fill = fill_color)) +
+geom_tile(color = "white") +
+geom_text(aes(label = stars), size = 5) +
+scale_fill_manual(
+  values = c("positif" = "#1b9e77", "négatif" = "red2", "neutre" = "#e0e0e0"),
+  guide = FALSE
+) +
+labs(
+  title = "Modèles simples : PAPm ~ FER (8-12 ans)",
+  x = "Ville",
+  y = "Variable explicative"
+) +
+theme_minimal() +
+theme(
+  axis.text.x = element_text(angle = 20, hjust = 1),
+  panel.grid = element_blank()
+)
+```
+
+```{r}
+# FULL 12
+
+data = read.csv("fer.csv")
+data = data %>% select("Code_Sujet", "Indice.hémolyse", "CRP",
+"FER", "FERRITINE", "TRANSFERINE", "RECEPTEUR.TRANSFERINE", "PROGESTERONE", "OESTRADIOL")
+data$RECEPTEUR.TRANSFERINE <- as.numeric(gsub("<", "", data$RECEPTEUR.TRANSFERINE))
+data$PROGESTERONE <- as.numeric(gsub("<", "", data$PROGESTERONE))
+data$OESTRADIOL <- as.numeric(gsub("<", "", data$OESTRADIOL))
+
+data2 = read.csv("data.csv")
+
+data = left_join(data, data2, by = "Code_Sujet")
+data <- data %>%
+  filter(!is.na(Ville_eval))
+
+mes_vars <- c("Indice.hémolyse", "CRP",
+"FER", "FERRITINE", "TRANSFERINE", "RECEPTEUR.TRANSFERINE", "PROGESTERONE", "OESTRADIOL")
+
+data$Ville_eval <- factor(data$Ville_eval, levels = c("Lima (150m)", "Cusco (3400m)", "Juliaca (3800m)", "La Rinconada (5100m)"))
+data = data[data$Age_categorie_binaire == "8-12 ans",]
+
+# Fonction qui crée les modèles pour chaque niveau d'altitude
+models_by_altitude <- data %>%
+  group_by(Ville_eval) %>%
+  group_split() %>%
+  map(function(df) {
+    list(
+      mod1 = lm(PAPm ~ FER, data = df),
+      mod2 = lm(PAPm ~ FERRITINE, data = df),
+      mod3 = lm(PAPm ~ TRANSFERINE, data = df),
+      mod4 = lm(PAPm ~ RECEPTEUR.TRANSFERINE, data = df),
+      Ville_eval = unique(df$Ville_eval)
+    )
+  })
+
+coef_data <- map_df(models_by_altitude, function(mods) {
+  altitude <- mods$Ville_eval
+
+  # Extraire les coefficients de tous les modèles
+  bind_rows(
+    tidy(mods$mod1, conf.int = TRUE) %>% mutate(model = "FER"),
+    tidy(mods$mod2, conf.int = TRUE) %>% mutate(model = "FERRITINE"),
+    tidy(mods$mod3, conf.int = TRUE) %>% mutate(model = "TRANSFERINE"),
+    tidy(mods$mod4, conf.int = TRUE) %>% mutate(model = "RECEPTEUR.TRANSFERINE")
+  ) %>% mutate(Ville_eval = altitude)
+})
+
+coef_data <- coef_data %>%
+  filter(term != "(Intercept)") %>%
+  mutate(significant = ifelse(conf.low > 0 | conf.high < 0, "Yes", "No"))
+
+ggplot(coef_data, aes(x = estimate, y = term, color = model, shape = significant, alpha = significant)) +
+  geom_point(position = position_dodge(width = 0.6), size = 3) +
+  scale_color_manual(values = c(
+  "FERRITINE" = "#1b9e77",           # vert foncé
+  "TRANSFERINE" = "#e6ab02",          # orange
+  "RECEPTEUR.TRANSFERINE" = "#7570b3",
+  "FER" = "salmon"
+)) +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high),
+                 height = 0.2, position = position_dodge(width = 0.6)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") + 
+  labs(x = "Coefficient estimé", y = "Variable explicative",
+       color = "Explained variable", shape = "Significatif ?", title = "Linear models PAPm ~ FER") +
+  scale_shape_manual(values = c("No" = 4, "Yes" = 15)) +
+  scale_alpha_manual(values = c("Yes" = 1, "No" = 0.2), guide = "none")+
+  facet_wrap(~ Ville_eval) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+```{r}
+# ANEMIE
+
+
+data = read.csv("fer.csv")
+data = data %>% select("Code_Sujet", "Indice.hémolyse", "CRP",
+"FER", "FERRITINE", "TRANSFERINE", "RECEPTEUR.TRANSFERINE", "PROGESTERONE", "OESTRADIOL")
+data$RECEPTEUR.TRANSFERINE <- as.numeric(gsub("<", "", data$RECEPTEUR.TRANSFERINE))
+data$PROGESTERONE <- as.numeric(gsub("<", "", data$PROGESTERONE))
+data$OESTRADIOL <- as.numeric(gsub("<", "", data$OESTRADIOL))
+
+data2 = read.csv("data.csv")
+
+data = left_join(data, data2, by = "Code_Sujet")
+data <- data %>%
+  filter(!is.na(Ville_eval))
+
+mes_vars <- c("Indice.hémolyse", "CRP",
+"FER", "FERRITINE", "TRANSFERINE", "RECEPTEUR.TRANSFERINE", "PROGESTERONE", "OESTRADIOL")
+
+data$Ville_eval <- factor(data$Ville_eval, levels = c("Lima (150m)", "Cusco (3400m)", "Juliaca (3800m)", "La Rinconada (5100m)"))
+data = data[data$Age_categorie_binaire == "0-3 ans",]
+# Fonction qui crée les modèles pour chaque niveau d'altitude
+models_by_altitude <- data %>%
+  group_by(Ville_eval) %>%
+  group_split() %>%
+  map(function(df) {
+list(
+  mod = lm(Vitamine.C..mg. ~ FER, data = df),
+  mod_Fibres    = lm(Vitamine.C..mg. ~ FERRITINE, data = df),
+  mod_Calcium   = lm(Vitamine.C..mg. ~ TRANSFERINE, data = df),
+  mod_Fer       = lm(Vitamine.C..mg. ~ RECEPTEUR.TRANSFERINE, data = df),
+  Ville_eval      = unique(df$Ville_eval)
+)
+  })
+
+coef_data <- map_df(models_by_altitude, function(mods) {
+  altitude <- mods$Ville_eval
+
+  # Extraire les coefficients de tous les modèles
+  bind_rows(
+    tidy(mods$mod, conf.int = TRUE) %>% mutate(model = "ontrol"),
+    tidy(mods$mod_Fibres, conf.int = TRUE) %>% mutate(model = "Emotional Control"),
+    tidy(mods$mod_Calcium, conf.int = TRUE) %>% mutate(model = "Initiative"),
+    tidy(mods$mod_Fer, conf.int = TRUE) %>% mutate(model = "Memory-Work"),
+  ) %>% mutate(Ville_eval = altitude)
+})
+
+coef_data <- coef_data %>%
+  filter(term != "(Intercept)") %>%
+  mutate(significant = ifelse(conf.low > 0 | conf.high < 0, "Yes", "No"))
+
+coef_table_stars <- coef_data %>%
+  mutate(
+    stars = case_when(
+      p.value <= 0.01 ~ "***",
+      p.value <= 0.05 ~ "**",
+      p.value <= 0.1 ~ "*",
+      TRUE ~ ""
+    ),
+    fill_color = case_when(
+      (p.value <= 0.1 & estimate > 0) ~ "positif",
+      (p.value <= 0.1 & estimate < 0) ~ "négatif",
+      TRUE ~ "neutre"
+    )
+  ) %>%
+  select(Ville_eval, term, stars, fill_color)
+
+ggplot(coef_table_stars, aes(x = Ville_eval, y = term, fill = fill_color)) +
+geom_tile(color = "white") +
+geom_text(aes(label = stars), size = 5) +
+scale_fill_manual(
+  values = c("positif" = "#1b9e77", "négatif" = "red2", "neutre" = "#e0e0e0"),
+  guide = FALSE
+) +
+labs(
+  title = "Modèles simples : Vit.C ~ FER (sang) (0-3 ans)",
+  x = "Ville",
+  y = "Variable explicative"
+) +
+theme_minimal() +
+theme(
+  axis.text.x = element_text(angle = 20, hjust = 1),
+  panel.grid = element_blank()
+)
+```
+
+```{r}
+# HB
+
+
+data = read.csv("fer.csv")
+data = data %>% select("Code_Sujet", "Indice.hémolyse", "CRP",
+"FER", "FERRITINE", "TRANSFERINE", "RECEPTEUR.TRANSFERINE", "PROGESTERONE", "OESTRADIOL")
+data$RECEPTEUR.TRANSFERINE <- as.numeric(gsub("<", "", data$RECEPTEUR.TRANSFERINE))
+data$PROGESTERONE <- as.numeric(gsub("<", "", data$PROGESTERONE))
+data$OESTRADIOL <- as.numeric(gsub("<", "", data$OESTRADIOL))
+
+data2 = read.csv("data.csv")
+
+data = left_join(data, data2, by = "Code_Sujet")
+data <- data %>%
+  filter(!is.na(Ville_eval))
+
+mes_vars <- c("Indice.hémolyse", "CRP",
+"FER", "FERRITINE", "TRANSFERINE", "RECEPTEUR.TRANSFERINE", "PROGESTERONE", "OESTRADIOL")
+
+data$Ville_eval <- factor(data$Ville_eval, levels = c("Lima (150m)", "Cusco (3400m)", "Juliaca (3800m)", "La Rinconada (5100m)"))
+
+data = data[data$Age_categorie_binaire == "8-12 ans",]
+
+# Fonction qui crée les modèles pour chaque niveau d'altitude
+models_by_altitude <- data %>%
+  group_by(Ville_eval) %>%
+  group_split() %>%
+  map(function(df) {
+list(
+  #mod_Protéines = lm(HCT.. ~ Indice.hémolyse, data = df),
+  mod_Lipides   = lm(CRP ~ Polyglobulie_14.5_OMS2024, data = df),
+  mod_Glucides  = lm(FER ~ Polyglobulie_14.5_OMS2024, data = df),
+  mod_Fibres    = lm(FERRITINE ~ Polyglobulie_14.5_OMS2024, data = df),
+  mod_Calcium   = lm(TRANSFERINE ~ Polyglobulie_14.5_OMS2024, data = df),
+  mod_Fer       = lm(RECEPTEUR.TRANSFERINE ~ Polyglobulie_14.5_OMS2024, data = df),
+  #mod_Zinc      = lm(HCT.. ~ PROGESTERONE, data = df),
+  #mod_VitC      = lm(HCT.. ~ OESTRADIOL, data = df),
+  Ville_eval      = unique(df$Ville_eval)
+)
+  })
+
+coef_data <- map_df(models_by_altitude, function(mods) {
+  altitude <- mods$Ville_eval
+
+  bind_rows(
+    tidy(mods$mod_Lipides, conf.int = TRUE) %>% mutate(var_dep = "CRP"),
+    tidy(mods$mod_Glucides, conf.int = TRUE) %>% mutate(var_dep = "FER"),
+    tidy(mods$mod_Fibres, conf.int = TRUE) %>% mutate(var_dep = "FERRITINE"),
+    tidy(mods$mod_Calcium, conf.int = TRUE) %>% mutate(var_dep = "TRANSFERINE"),
+    tidy(mods$mod_Fer, conf.int = TRUE) %>% mutate(var_dep = "RECEPTEUR.TRANSFERINE")
+  ) %>% mutate(Ville_eval = altitude)
+})
+
+coef_data <- coef_data %>%
+  filter(term != "(Intercept)") %>%
+  mutate(significant = ifelse(conf.low > 0 | conf.high < 0, "Yes", "No"))
+
+coef_table_stars <- coef_data %>%
+  mutate(
+    stars = case_when(
+      p.value <= 0.01 ~ "***",
+      p.value <= 0.05 ~ "**",
+      p.value <= 0.1 ~ "*",
+      TRUE ~ ""
+    ),
+    fill_color = case_when(
+      (p.value <= 0.1 & estimate > 0) ~ "positif",
+      (p.value <= 0.1 & estimate < 0) ~ "négatif",
+      TRUE ~ "neutre"
+    )
+  ) %>%
+  select(Ville_eval, var_dep, stars, fill_color)
+
+ggplot(coef_table_stars, aes(x = Ville_eval, y = var_dep, fill = fill_color)) +
+geom_tile(color = "white") +
+geom_text(aes(label = stars), size = 5) +
+scale_fill_manual(
+  values = c("positif" = "#1b9e77", "négatif" = "red2", "neutre" = "#e0e0e0"),
+  guide = FALSE
+) +
+labs(
+  title = "Modèles simples : FER ~ Polyglobulie_OMS2024 (8-12 ans)",
+  x = "Ville",
+  y = "Variable explicative"
+) +
+theme_minimal() +
+theme(
+  axis.text.x = element_text(angle = 20, hjust = 1),
+  panel.grid = element_blank()
+)
+```
