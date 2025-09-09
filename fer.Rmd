@@ -16,6 +16,7 @@ library(modelsummary)
 library(glue)
 library(gt)
 library(car)
+library(pROC)
 library(dunn.test)
 library(rcompanion)
 library(rstatix)
@@ -28,6 +29,7 @@ library(lmtest)
 library(readxl)
 library(openxlsx)
 library(pheatmap)
+library(forcats)
 ```
 
 
@@ -570,4 +572,654 @@ theme(
   axis.text.x = element_text(angle = 20, hjust = 1),
   panel.grid = element_blank()
 )
+```
+
+```{r}
+df = read.csv("datafinalfinal.csv")
+
+prop_df <- df %>%
+  mutate(
+    Anemie_OMS2011 = Anemie_OMS2011 == "oui",
+    Anemie_OMS2024 = Anemie_OMS2024 == "oui",
+    CRP.élevée = CRP.élevée == "oui",
+    Iron.deficiency = Iron.deficiency == "oui"
+  ) %>%
+  select(Anemie_OMS2011, Anemie_OMS2024, CRP.élevée, Iron.deficiency) %>%
+  tidyr::pivot_longer(cols = c(Anemie_OMS2011, Anemie_OMS2024),
+                      names_to = "definition_anemie",
+                      values_to = "anemie") %>%
+  filter(anemie == TRUE) %>%
+  summarise(
+    n = n(),
+    CRP.élevée = mean(CRP.élevée, na.rm = TRUE),
+    Iron.deficiency = mean(Iron.deficiency, na.rm = TRUE),
+    .by = definition_anemie
+  ) %>%
+  tidyr::pivot_longer(cols = c(CRP.élevée, Iron.deficiency),
+                      names_to = "variable",
+                      values_to = "proportion")
+
+# Affichage
+ggplot(prop_df, aes(x = definition_anemie, y = proportion, fill = variable)) +
+  geom_col(position = "dodge") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(
+    title = "Proportion de biomarqueurs anormaux chez les enfants anémiques",
+    subtitle = "Comparaison entre les définitions OMS 2011 et OMS 2024",
+    x = "Définition de l'anémie",
+    y = "Proportion avec anomalie",
+    fill = "Variable"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+df <- read.xlsx("fer4.xlsx")
+
+# Mise au format logique
+df2 <- df %>%
+  mutate(
+    CRP.élevée = CRP.élevée == "oui",
+    Iron.deficiency = Iron.deficiency == "oui",
+    Anemie_OMS2011 = Anemie_OMS2011 == "oui",
+    Anemie_OMS2024 = Anemie_OMS2024 == "oui"
+  )
+
+# Pivot plus calculs
+prop_reverse <- df2 %>%
+  select(CRP.élevée, Iron.deficiency, Anemie_OMS2011, Anemie_OMS2024) %>%
+  pivot_longer(cols = c(CRP.élevée, Iron.deficiency),
+               names_to = "anomalie",
+               values_to = "valeur_anomalie") %>%
+  filter(valeur_anomalie == TRUE) %>%
+  summarise(
+    n = n(),
+    OMS2011 = mean(Anemie_OMS2011, na.rm = TRUE),
+    OMS2024 = mean(Anemie_OMS2024, na.rm = TRUE),
+    .by = anomalie
+  ) %>%
+  pivot_longer(cols = c(OMS2011, OMS2024),
+               names_to = "definition_anemie",
+               values_to = "proportion")
+
+# Graphique
+ggplot(prop_reverse, aes(x = anomalie, y = proportion, fill = definition_anemie)) +
+  geom_col(position = "dodge") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(
+    title = "Proportion d'enfants anémiques parmi ceux avec anomalie biologique",
+    subtitle = "Qui parmi les CRP élevées ou carences martiales est anémique ?",
+    x = "Biomarqueur anormal",
+    y = "Proportion anémique",
+    fill = "Définition OMS"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+data = read.csv("datafinalfinal.csv")
+data_clean <- data %>%
+  drop_na(Anemie_OMS2024, Anemie_OMS2011, Iron.deficiency, CRP.élevée)
+
+mcnemar_auto <- function(x, y, correct = FALSE) {
+  # Vérifier que x et y sont binaires
+  if (length(unique(na.omit(x))) != 2 || length(unique(na.omit(y))) != 2) {
+    stop("Les deux variables doivent être binaires (2 modalités).")
+  }
+
+  # Table de contingence
+  tbl <- table(x, y)
+
+  # Discordants
+  n01 <- tbl[1, 2]
+  n10 <- tbl[2, 1]
+  discordants <- n01 + n10
+
+  # Test exact si discordants < 25
+  if (discordants < 25) {
+    res <- mcnemar.test(tbl, correct = correct, exact = TRUE)
+    type <- "Test exact de McNemar"
+  } else {
+    res <- mcnemar.test(tbl, correct = correct)
+    type <- "Test de McNemar (chi²)"
+  }
+
+  # Retourne un résumé
+  list(
+    table = tbl,
+    method = type,
+    statistic = res$statistic,
+    p.value = res$p.value
+  )
+}
+
+pval = mcnemar_auto(data_clean$Anemie_OMS2024, data_clean$Iron.deficiency)$p.value
+methode = mcnemar_auto(data_clean$Anemie_OMS2024, data_clean$Iron.deficiency)$method
+n_total <- nrow(data_clean)
+
+# Créer un titre dynamique
+titre <- paste0(
+  "Proportions croisées anémie : OMS 2024 v.s. Iron.low\n",
+  "n = ", n_total, " ; ", "pval ", methode, " = ", round(pval, 3)
+)
+
+# Construire la heatmap
+data_clean %>%
+  count(Anemie_OMS2024, Iron.deficiency) %>%
+  group_by(Iron.deficiency) %>%
+  mutate(prop = n / sum(n)) %>%
+  ggplot(aes(x = Anemie_OMS2024, y = Iron.deficiency, fill = prop)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = scales::percent(prop, accuracy = 1)), size = 5) +
+  scale_fill_gradient(low = "white", high = "red") +
+  labs(
+    title = titre,
+    x = "Anémie_OMS2024",
+    y = "Iron.low",
+    fill = "Proportion"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+data = read.xlsx("fer4.xlsx")
+data_clean <- data %>%
+  drop_na(Anemie_OMS2024, Anemie_OMS2011, Iron.deficiency, CRP.élevée)
+
+mcnemar_auto <- function(x, y, correct = FALSE) {
+  # Vérifier que x et y sont binaires
+  if (length(unique(na.omit(x))) != 2 || length(unique(na.omit(y))) != 2) {
+    stop("Les deux variables doivent être binaires (2 modalités).")
+  }
+
+  # Table de contingence
+  tbl <- table(x, y)
+
+  # Discordants
+  n01 <- tbl[1, 2]
+  n10 <- tbl[2, 1]
+  discordants <- n01 + n10
+
+  # Test exact si discordants < 25
+  if (discordants < 25) {
+    res <- mcnemar.test(tbl, correct = correct, exact = TRUE)
+    type <- "Test exact de McNemar"
+  } else {
+    res <- mcnemar.test(tbl, correct = correct)
+    type <- "Test de McNemar (chi²)"
+  }
+
+  # Retourne un résumé
+  list(
+    table = tbl,
+    method = type,
+    statistic = res$statistic,
+    p.value = res$p.value
+  )
+}
+
+pval = mcnemar_auto(data_clean$Anemie_OMS2024, data_clean$CRP.élevée)$p.value
+methode = mcnemar_auto(data_clean$Anemie_OMS2024, data_clean$CRP.élevée)$method
+n_total <- nrow(data_clean)
+
+# Créer un titre dynamique
+titre <- paste0(
+  "Proportions croisées anémie : OMS 2024 v.s. CRP.élevée \n",
+  "n = ", n_total, " ; ", "pval ", methode, " = ", round(pval, 3)
+)
+
+# Construire la heatmap
+data_clean %>%
+  count(Anemie_OMS2024, CRP.élevée) %>%
+  group_by(CRP.élevée) %>%
+  mutate(prop = n / sum(n)) %>%
+  ggplot(aes(x = Anemie_OMS2024, y = CRP.élevée, fill = prop)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = scales::percent(prop, accuracy = 1)), size = 5) +
+  scale_fill_gradient(low = "white", high = "red") +
+  labs(
+    title = titre,
+    x = "Anémie_OMS2024",
+    y = "CRP.élevée",
+    fill = "Proportion"
+  ) +
+  theme_minimal()
+```
+
+
+
+```{r}
+data = read.xlsx("fer4.xlsx")
+data_clean <- data %>%
+  drop_na(Anemie_OMS2024, Anemie_OMS2011, Iron.deficiency, CRP.élevée)
+
+mcnemar_auto <- function(x, y, correct = FALSE) {
+  # Vérifier que x et y sont binaires
+  if (length(unique(na.omit(x))) != 2 || length(unique(na.omit(y))) != 2) {
+    stop("Les deux variables doivent être binaires (2 modalités).")
+  }
+
+  # Table de contingence
+  tbl <- table(x, y)
+
+  # Discordants
+  n01 <- tbl[1, 2]
+  n10 <- tbl[2, 1]
+  discordants <- n01 + n10
+
+  # Test exact si discordants < 25
+  if (discordants < 25) {
+    res <- mcnemar.test(tbl, correct = correct, exact = TRUE)
+    type <- "Test exact de McNemar"
+  } else {
+    res <- mcnemar.test(tbl, correct = correct)
+    type <- "Test de McNemar (chi²)"
+  }
+
+  # Retourne un résumé
+  list(
+    table = tbl,
+    method = type,
+    statistic = res$statistic,
+    p.value = res$p.value
+  )
+}
+
+pval = mcnemar_auto(data_clean$Anemie_OMS2011, data_clean$Iron.deficiency)$p.value
+methode = mcnemar_auto(data_clean$Anemie_OMS2011, data_clean$Iron.deficiency)$method
+n_total <- nrow(data_clean)
+
+# Créer un titre dynamique
+titre <- paste0(
+  "Proportions croisées anémie : OMS 2011 v.s. Iron.low\n",
+  "n = ", n_total, " ; ", "pval ", methode, " = ", round(pval, 3)
+)
+
+# Construire la heatmap
+data_clean %>%
+  count(Anemie_OMS2011, Iron.deficiency) %>%
+  group_by(Iron.deficiency) %>%
+  mutate(prop = n / sum(n)) %>%
+  ggplot(aes(x = Anemie_OMS2011, y = Iron.deficiency, fill = prop)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = scales::percent(prop, accuracy = 1)), size = 5) +
+  scale_fill_gradient(low = "white", high = "red") +
+  labs(
+    title = titre,
+    x = "Anemie_OMS2011",
+    y = "Iron.low",
+    fill = "Proportion"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+data = read.xlsx("fer4.xlsx")
+data_clean <- data %>%
+  drop_na(Anemie_OMS2024, Anemie_OMS2011, Iron.deficiency, CRP.élevée)
+
+mcnemar_auto <- function(x, y, correct = FALSE) {
+  # Vérifier que x et y sont binaires
+  if (length(unique(na.omit(x))) != 2 || length(unique(na.omit(y))) != 2) {
+    stop("Les deux variables doivent être binaires (2 modalités).")
+  }
+
+  # Table de contingence
+  tbl <- table(x, y)
+
+  # Discordants
+  n01 <- tbl[1, 2]
+  n10 <- tbl[2, 1]
+  discordants <- n01 + n10
+
+  # Test exact si discordants < 25
+  if (discordants < 25) {
+    res <- mcnemar.test(tbl, correct = correct, exact = TRUE)
+    type <- "Test exact de McNemar"
+  } else {
+    res <- mcnemar.test(tbl, correct = correct)
+    type <- "Test de McNemar (chi²)"
+  }
+
+  # Retourne un résumé
+  list(
+    table = tbl,
+    method = type,
+    statistic = res$statistic,
+    p.value = res$p.value
+  )
+}
+
+pval = mcnemar_auto(data_clean$Anemie_OMS2011, data_clean$CRP.élevée)$p.value
+methode = mcnemar_auto(data_clean$Anemie_OMS2011, data_clean$CRP.élevée)$method
+n_total <- nrow(data_clean)
+
+# Créer un titre dynamique
+titre <- paste0(
+  "Proportions croisées anémie : OMS 2011 v.s. CRP.élevée \n",
+  "n = ", n_total, " ; ", "pval ", methode, " = ", round(pval, 3)
+)
+
+# Construire la heatmap
+data_clean %>%
+  count(Anemie_OMS2011, CRP.élevée) %>%
+  group_by(CRP.élevée) %>%
+  mutate(prop = n / sum(n)) %>%
+  ggplot(aes(x = Anemie_OMS2011, y = CRP.élevée, fill = prop)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = scales::percent(prop, accuracy = 1)), size = 5) +
+  scale_fill_gradient(low = "white", high = "red") +
+  labs(
+    title = titre,
+    x = "Anemie_OMS2011",
+    y = "CRP.élevée",
+    fill = "Proportion"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+data = read.xlsx("fer4.xlsx")
+data_clean <- data %>%
+  drop_na(Anemie_OMS2024, Anemie_OMS2011, Iron.deficiency, CRP.élevée)
+
+mcnemar_auto <- function(x, y, correct = FALSE) {
+  # Vérifier que x et y sont binaires
+  if (length(unique(na.omit(x))) != 2 || length(unique(na.omit(y))) != 2) {
+    stop("Les deux variables doivent être binaires (2 modalités).")
+  }
+
+  # Table de contingence
+  tbl <- table(x, y)
+
+  # Discordants
+  n01 <- tbl[1, 2]
+  n10 <- tbl[2, 1]
+  discordants <- n01 + n10
+
+  # Test exact si discordants < 25
+  if (discordants < 25) {
+    res <- mcnemar.test(tbl, correct = correct, exact = TRUE)
+    type <- "Test exact de McNemar"
+  } else {
+    res <- mcnemar.test(tbl, correct = correct)
+    type <- "Test de McNemar (chi²)"
+  }
+
+  # Retourne un résumé
+  list(
+    table = tbl,
+    method = type,
+    statistic = res$statistic,
+    p.value = res$p.value
+  )
+}
+
+pval = mcnemar_auto(data_clean$Iron.deficiency, data_clean$CRP.élevée)$p.value
+methode = mcnemar_auto(data_clean$Iron.deficiency, data_clean$CRP.élevée)$method
+n_total <- nrow(data_clean)
+
+# Créer un titre dynamique
+titre <- paste0(
+  "Proportions croisées : Iron.low v.s. CRP.élevée \n",
+  "n = ", n_total, " ; ", "pval ", methode, " = ", round(pval, 3)
+)
+
+# Construire la heatmap
+data_clean %>%
+  count(Iron.deficiency, CRP.élevée) %>%
+  group_by(CRP.élevée) %>%
+  mutate(prop = n / sum(n)) %>%
+  ggplot(aes(x = Iron.deficiency, y = CRP.élevée, fill = prop)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = scales::percent(prop, accuracy = 1)), size = 5) +
+  scale_fill_gradient(low = "white", high = "red") +
+  labs(
+    title = titre,
+    x = "Iron.low",
+    y = "CRP.élevée",
+    fill = "Proportion"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+# Lecture des données
+df <- read.xlsx("fer4.xlsx")
+
+# Sélection et conversion des colonnes
+df_clean <- df %>%
+  mutate(
+    CRP.élevée = factor(CRP.élevée, levels = c("non", "oui")),
+    FER = as.numeric(FER),
+    FERRITINE = as.numeric(FERRITINE),
+    TRANSFERINE = as.numeric(TRANSFERINE),
+    RECEPTEUR.TRANSFERINE = as.numeric(RECEPTEUR.TRANSFERINE)
+  ) %>%
+  select(CRP.élevée, FER, FERRITINE, TRANSFERINE, RECEPTEUR.TRANSFERINE)
+
+# Passage en format long
+df_long <- df_clean %>%
+  pivot_longer(cols = c(FER, FERRITINE, TRANSFERINE, RECEPTEUR.TRANSFERINE),
+               names_to = "parametre",
+               values_to = "valeur")
+
+# Calcul des moyennes
+df_summary <- df_long %>%
+  group_by(CRP.élevée, parametre) %>%
+  summarise(moyenne = mean(valeur, na.rm = TRUE), .groups = "drop")
+
+# Barplot
+
+ggplot(df_long %>% filter(!is.na(CRP.élevée)), aes(x = CRP.élevée, y = valeur, fill = CRP.élevée)) +
+  geom_boxplot() +
+  facet_wrap(~ parametre, scales = "free_y") +
+  stat_compare_means(method = "t.test", label = "p.signif", hjust = -5, vjust = 3, symnum.args = list(
+      cutpoints = c(0, 0.01, 0.05, 0.10, 1),
+      symbols = c("***", "**", "*", "ns")
+    ), size = 6) +  # ou "p.format" pour la valeur exacte
+  labs(
+    title = "Comparaison des paramètres du fer selon le statut CRP",
+    subtitle = "Avec t.test (CRP élevée vs normale)",
+    x = "CRP élevée ?",
+    y = "Valeur du paramètre"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+```{r}
+# Lecture des données
+df <- read.xlsx("fer4.xlsx")
+
+# Sélection et conversion des colonnes
+df_clean <- df %>%
+  mutate(
+    Anemie_OMS2024 = factor(Anemie_OMS2024, levels = c("non", "oui")),
+    FER = as.numeric(FER),
+    FERRITINE = as.numeric(FERRITINE),
+    TRANSFERINE = as.numeric(TRANSFERINE),
+    RECEPTEUR.TRANSFERINE = as.numeric(RECEPTEUR.TRANSFERINE)
+  ) %>%
+  select(Anemie_OMS2024, FER, FERRITINE, TRANSFERINE, RECEPTEUR.TRANSFERINE)
+
+# Passage en format long
+df_long <- df_clean %>%
+  pivot_longer(cols = c(FER, FERRITINE, TRANSFERINE, RECEPTEUR.TRANSFERINE),
+               names_to = "parametre",
+               values_to = "valeur")
+
+# Calcul des moyennes
+df_summary <- df_long %>%
+  group_by(Anemie_OMS2024, parametre) %>%
+  summarise(moyenne = mean(valeur, na.rm = TRUE), .groups = "drop")
+
+# Barplot
+
+ggplot(df_long %>% filter(!is.na(Anemie_OMS2024)), aes(x = Anemie_OMS2024, y = valeur, fill = Anemie_OMS2024)) +
+  geom_boxplot() +
+  facet_wrap(~ parametre, scales = "free_y") +
+  stat_compare_means(method = "t.test", label = "p.signif", hjust = -5, vjust = 3, symnum.args = list(
+      cutpoints = c(0, 0.01, 0.05, 0.10, 1),
+      symbols = c("***", "**", "*", "ns")
+    ), size = 6) +  # ou "p.format" pour la valeur exacte
+  labs(
+    title = "Comparaison des paramètres du fer selon le statut Anemique (OMS2024)",
+    subtitle = "Avec t.test (Anemique vs non-anemique)",
+    x = "Anemique (OMS2024) ?",
+    y = "Valeur du paramètre"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+```{r}
+# Lecture des données
+df <- read.xlsx("fer4.xlsx")
+
+# Sélection et conversion des colonnes
+df_clean <- df %>%
+  mutate(
+    Anemie_OMS2011 = factor(Anemie_OMS2011, levels = c("non", "oui")),
+    FER = as.numeric(FER),
+    FERRITINE = as.numeric(FERRITINE),
+    TRANSFERINE = as.numeric(TRANSFERINE),
+    RECEPTEUR.TRANSFERINE = as.numeric(RECEPTEUR.TRANSFERINE)
+  ) %>%
+  select(Anemie_OMS2011, FER, FERRITINE, TRANSFERINE, RECEPTEUR.TRANSFERINE)
+
+# Passage en format long
+df_long <- df_clean %>%
+  pivot_longer(cols = c(FER, FERRITINE, TRANSFERINE, RECEPTEUR.TRANSFERINE),
+               names_to = "parametre",
+               values_to = "valeur")
+
+# Calcul des moyennes
+df_summary <- df_long %>%
+  group_by(Anemie_OMS2011, parametre) %>%
+  summarise(moyenne = mean(valeur, na.rm = TRUE), .groups = "drop")
+
+# Barplot
+
+ggplot(df_long %>% filter(!is.na(Anemie_OMS2011)), aes(x = Anemie_OMS2011, y = valeur, fill = Anemie_OMS2011)) +
+  geom_boxplot() +
+  facet_wrap(~ parametre, scales = "free_y") +
+  stat_compare_means(method = "t.test", label = "p.signif", hjust = -5, vjust = 3, symnum.args = list(
+      cutpoints = c(0, 0.01, 0.05, 0.10, 1),
+      symbols = c("***", "**", "*", "ns")
+    ), size = 6) +  # ou "p.format" pour la valeur exacte
+  labs(
+    title = "Comparaison des paramètres du fer selon le statut Anemique (OMS2011)",
+    subtitle = "Avec t.test (Anemique vs non-anemique)",
+    x = "Anemique (OMS2011) ?",
+    y = "Valeur du paramètre"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+```{r}
+# Lecture des données
+df <- read.xlsx("fer5.xlsx")
+
+# Sélection et conversion des colonnes
+df_clean <- df %>%
+  mutate(
+    Polyglobulie_OMS2024 = factor(Polyglobulie_14.5_OMS2024, levels = c("non", "oui")),
+    FER = as.numeric(FER),
+    FERRITINE = as.numeric(FERRITINE),
+    TRANSFERINE = as.numeric(TRANSFERINE),
+    RECEPTEUR.TRANSFERINE = as.numeric(RECEPTEUR.TRANSFERINE)
+  ) %>%
+  select(Polyglobulie_14.5_OMS2024, FER, FERRITINE, TRANSFERINE, RECEPTEUR.TRANSFERINE)
+
+# Passage en format long
+df_long <- df_clean %>%
+  pivot_longer(cols = c(FER, FERRITINE, TRANSFERINE, RECEPTEUR.TRANSFERINE),
+               names_to = "parametre",
+               values_to = "valeur")
+
+# Calcul des moyennes
+df_summary <- df_long %>%
+  group_by(Polyglobulie_14.5_OMS2024, parametre) %>%
+  summarise(moyenne = mean(valeur, na.rm = TRUE), .groups = "drop")
+
+# Barplot
+
+ggplot(df_long %>% filter(!is.na(Polyglobulie_14.5_OMS2024)), aes(x = Polyglobulie_14.5_OMS2024, y = valeur, fill = Polyglobulie_14.5_OMS2024)) +
+  geom_boxplot() +
+  facet_wrap(~ parametre, scales = "free_y") +
+  stat_compare_means(method = "t.test", label = "p.signif", hjust = -5, vjust = 3, symnum.args = list(
+      cutpoints = c(0, 0.01, 0.05, 0.10, 1),
+      symbols = c("***", "**", "*", "ns")
+    ), size = 6) +  # ou "p.format" pour la valeur exacte
+  labs(
+    title = "Comparaison des paramètres du fer selon le statut Polyglobulique (OMS2024)",
+    subtitle = "Avec t.test (Polyglobulique vs non-polyglobulique)",
+    x = "Polyglobulique (OMS2024) ?",
+    y = "Valeur du paramètre"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+```{r}
+# Lecture des données
+df <- read.xlsx("fer5.xlsx")
+
+# Sélection et conversion des colonnes
+df_clean <- df %>%
+  mutate(
+    Polyglobulie_OMS2011 = factor(Polyglobulie_14.5_OMS2011, levels = c("non", "oui")),
+    FER = as.numeric(FER),
+    FERRITINE = as.numeric(FERRITINE),
+    TRANSFERINE = as.numeric(TRANSFERINE),
+    RECEPTEUR.TRANSFERINE = as.numeric(RECEPTEUR.TRANSFERINE)
+  ) %>%
+  select(Polyglobulie_14.5_OMS2011, FER, FERRITINE, TRANSFERINE, RECEPTEUR.TRANSFERINE)
+
+# Passage en format long
+df_long <- df_clean %>%
+  pivot_longer(cols = c(FER, FERRITINE, TRANSFERINE, RECEPTEUR.TRANSFERINE),
+               names_to = "parametre",
+               values_to = "valeur")
+
+# Calcul des moyennes
+df_summary <- df_long %>%
+  group_by(Polyglobulie_14.5_OMS2011, parametre) %>%
+  summarise(moyenne = mean(valeur, na.rm = TRUE), .groups = "drop")
+
+# Barplot
+
+ggplot(df_long %>% filter(!is.na(Polyglobulie_14.5_OMS2011)), aes(x = Polyglobulie_14.5_OMS2011, y = valeur, fill = Polyglobulie_14.5_OMS2011)) +
+  geom_boxplot() +
+  facet_wrap(~ parametre, scales = "free_y") +
+  stat_compare_means(method = "t.test", label = "p.signif", hjust = -5, vjust = 3, symnum.args = list(
+      cutpoints = c(0, 0.01, 0.05, 0.10, 1),
+      symbols = c("***", "**", "*", "ns")
+    ), size = 6) +  # ou "p.format" pour la valeur exacte
+  labs(
+    title = "Comparaison des paramètres du fer selon le statut Polyglobulique (OMS2011)",
+    subtitle = "Avec t.test (Polyglobulique vs non-polyglobulique)",
+    x = "Polyglobulique (OMS2011) ?",
+    y = "Valeur du paramètre"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+```{r}
+roc1 <- roc(data$Anemie_OMS2011, data$FER)
+roc2 <- roc(data$Anemie_OMS2024, data$FER)
+
+plot(roc1, col = "blue", print.auc = FALSE, main = "Courbes ROC FER Anemie (OMS2011 v.s. OMS2024)")
+plot(roc2, col = "red", add = TRUE, print.auc = FALSE)
+
+legend("bottomright",
+       legend = c(
+         paste0("OMS2011 (AUC = ", round(auc(roc1), 2), ")"),
+         paste0("OMS2024 (AUC = ", round(auc(roc2), 2), ")")
+       ),
+       col = c("blue", "red"),
+       lwd = 2)
 ```

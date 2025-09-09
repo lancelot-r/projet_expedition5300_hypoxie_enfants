@@ -95,7 +95,7 @@ n_total <- nrow(data_clean)
 
 # Créer un titre dynamique
 titre <- paste0(
-  "Proportions croisées anémie : OMS 2024 v.s. -1SD\n",
+  "Proportions croisées anémie : OMS 2024 v.s. OMS 2011\n",
   "n = ", n_total, " ; ", "pval ", methode, " = ", round(pval, 3)
 )
 
@@ -106,7 +106,7 @@ data_clean %>%
   mutate(prop = n / sum(n)) %>%
   ggplot(aes(x = Anemie_OMS2024, y = Anemie_OMS2011, fill = prop)) +
   geom_tile(color = "white") +
-  geom_text(aes(label = scales::percent(prop, accuracy = 1)), size = 5) +
+  geom_text(aes(label = paste0(scales::percent(prop, accuracy = 1), "\n(n=", n, ")")), size = 5) +
   scale_fill_gradient(low = "white", high = "red") +
   labs(
     title = titre,
@@ -171,7 +171,7 @@ data_clean %>%
   mutate(prop = n / sum(n)) %>%
   ggplot(aes(x = Anemie_OMS2024, y = Anemie_SD, fill = prop)) +
   geom_tile(color = "white") +
-  geom_text(aes(label = scales::percent(prop, accuracy = 1)), size = 5) +
+  geom_text(aes(label = paste0(scales::percent(prop, accuracy = 1), "\n(n=", n, ")")), size = 5) +
   scale_fill_gradient(low = "white", high = "red") +
   labs(
     title = titre,
@@ -225,7 +225,7 @@ n_total <- nrow(data_clean)
 
 # Créer un titre dynamique
 titre <- paste0(
-  "Proportions croisées polyglobulie : OMS 2024 v.s. -1SD\n",
+  "Proportions croisées polyglobulie : OMS 2024 v.s. OMS 2011\n",
   "n = ", n_total, " ; ", "pval ", methode, " ~ ", round(pval, 3)
 )
 
@@ -236,7 +236,7 @@ data_clean %>%
   mutate(prop = n / sum(n)) %>%
   ggplot(aes(x = Polyglobulie_14.5_OMS2024, y = Polyglobulie_14.5_OMS2011, fill = prop)) +
   geom_tile(color = "white") +
-  geom_text(aes(label = scales::percent(prop, accuracy = 1)), size = 5) +
+  geom_text(aes(label = paste0(scales::percent(prop, accuracy = 1), "\n(n=", n, ")")), size = 5) +
   scale_fill_gradient(low = "white", high = "red") +
   labs(
     title = titre,
@@ -248,9 +248,9 @@ data_clean %>%
 ```
 
 ```{r}
-data = read.csv("data.csv")
+data = read.csv("datafinalfinal.csv")
 data_clean <- data %>%
-  drop_na(Anemie_OMS2024, Anemie_SD)
+  drop_na(Anemie_OMS2024, Anemie_1.5SD)
 
 mcnemar_auto <- function(x, y, correct = FALSE) {
   # Vérifier que x et y sont binaires
@@ -284,29 +284,29 @@ mcnemar_auto <- function(x, y, correct = FALSE) {
   )
 }
 
-pval = mcnemar_auto(data_clean$Anemie_OMS2024, data_clean$Anemie_SD)$p.value
-methode = mcnemar_auto(data_clean$Anemie_OMS2024, data_clean$Anemie_SD)$method
+pval = mcnemar_auto(data_clean$Anemie_OMS2024, data_clean$Anemie_1.5SD)$p.value
+methode = mcnemar_auto(data_clean$Anemie_OMS2024, data_clean$Anemie_1.5SD)$method
 n_total <- nrow(data_clean)
 
 # Créer un titre dynamique
 titre <- paste0(
-  "Proportions croisées anémie : OMS 2024 v.s. -1SD\n",
+  "Proportions croisées anémie : OMS 2024 v.s. -1.5SD\n",
   "n = ", n_total, " ; ", "pval ", methode, " = ", round(pval, 3)
 )
 
 # Construire la heatmap
 data_clean %>%
-  count(Anemie_OMS2024, Anemie_SD) %>%
-  group_by(Anemie_SD) %>%
+  count(Anemie_OMS2024, Anemie_1.5SD) %>%
+  group_by(Anemie_1.5SD) %>%
   mutate(prop = n / sum(n)) %>%
-  ggplot(aes(x = Anemie_OMS2024, y = Anemie_SD, fill = prop)) +
+  ggplot(aes(x = Anemie_OMS2024, y = Anemie_1.5SD, fill = prop)) +
   geom_tile(color = "white") +
-  geom_text(aes(label = scales::percent(prop, accuracy = 1)), size = 5) +
+  geom_text(aes(label = paste0(scales::percent(prop, accuracy = 1), "\n(n=", n, ")")), size = 5) +
   scale_fill_gradient(low = "white", high = "red") +
   labs(
     title = titre,
     x = "Anémie_OMS2024",
-    y = "Anémie_SD",
+    y = "Anemie_1.5SD",
     fill = "Proportion"
   ) +
   theme_minimal()
@@ -366,7 +366,7 @@ data_clean %>%
   mutate(prop = n / sum(n)) %>%
   ggplot(aes(x = Anemie_OMS2024, y = Anemie_2SD, fill = prop)) +
   geom_tile(color = "white") +
-  geom_text(aes(label = scales::percent(prop, accuracy = 1)), size = 5) +
+  geom_text(aes(label = paste0(scales::percent(prop, accuracy = 1), "\n(n=", n, ")")), size = 5) +
   scale_fill_gradient(low = "white", high = "red") +
   labs(
     title = titre,
@@ -431,7 +431,7 @@ data_clean %>%
   mutate(prop = n / sum(n)) %>%
   ggplot(aes(x = Anemie_OMS2024, y = Anemie_SD_Hbmass_kg, fill = prop)) +
   geom_tile(color = "white") +
-  geom_text(aes(label = scales::percent(prop, accuracy = 1)), size = 5) +
+  geom_text(aes(label = paste0(scales::percent(prop, accuracy = 1), "\n(n=", n, ")")), size = 5) +
   scale_fill_gradient(low = "white", high = "red") +
   labs(
     title = titre,
@@ -495,7 +495,7 @@ data_clean %>%
   mutate(prop = n / sum(n)) %>%
   ggplot(aes(x = Anemie_OMS2024, y = Anemie_2SD_Hbmass_kg, fill = prop)) +
   geom_tile(color = "white") +
-  geom_text(aes(label = scales::percent(prop, accuracy = 1)), size = 5) +
+  geom_text(aes(label = paste0(scales::percent(prop, accuracy = 1), "\n(n=", n, ")")), size = 5) +
   scale_fill_gradient(low = "white", high = "red") +
   labs(
     title = titre,
@@ -560,7 +560,7 @@ data_clean %>%
   mutate(prop = n / sum(n)) %>%
   ggplot(aes(x = Anemie_OMS2011, y = Anemie_SD, fill = prop)) +
   geom_tile(color = "white") +
-  geom_text(aes(label = scales::percent(prop, accuracy = 1)), size = 5) +
+  geom_text(aes(label = paste0(scales::percent(prop, accuracy = 1), "\n(n=", n, ")")), size = 5) +
   scale_fill_gradient(low = "white", high = "red") +
   labs(
     title = titre,
@@ -625,7 +625,7 @@ data_clean %>%
   mutate(prop = n / sum(n)) %>%
   ggplot(aes(x = Anemie_OMS2011, y = Anemie_2SD, fill = prop)) +
   geom_tile(color = "white") +
-  geom_text(aes(label = scales::percent(prop, accuracy = 1)), size = 5) +
+  geom_text(aes(label = paste0(scales::percent(prop, accuracy = 1), "\n(n=", n, ")")), size = 5) +
   scale_fill_gradient(low = "white", high = "red") +
   labs(
     title = titre,
@@ -690,7 +690,7 @@ data_clean %>%
   mutate(prop = n / sum(n)) %>%
   ggplot(aes(x = Anemie_OMS2011, y = Anemie_SD_Hbmass_kg, fill = prop)) +
   geom_tile(color = "white") +
-  geom_text(aes(label = scales::percent(prop, accuracy = 1)), size = 5) +
+  geom_text(aes(label = paste0(scales::percent(prop, accuracy = 1), "\n(n=", n, ")")), size = 5) +
   scale_fill_gradient(low = "white", high = "red") +
   labs(
     title = titre,
@@ -754,7 +754,7 @@ data_clean %>%
   mutate(prop = n / sum(n)) %>%
   ggplot(aes(x = Anemie_OMS2011, y = Anemie_2SD_Hbmass_kg, fill = prop)) +
   geom_tile(color = "white") +
-  geom_text(aes(label = scales::percent(prop, accuracy = 1)), size = 5) +
+  geom_text(aes(label = paste0(scales::percent(prop, accuracy = 1), "\n(n=", n, ")")), size = 5) +
   scale_fill_gradient(low = "white", high = "red") +
   labs(
     title = titre,
