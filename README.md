@@ -45,13 +45,3 @@ Chaque RMD suppose que les fichiers de données sont disponibles dans le dossier
 Adapter les chemins si nécessaire.
 
 ---
-
-## Script global (optionnel)
-
-Le fichier `run_all.R` permet de lancer automatiquement l’ensemble des analyses dans l’ordre :
-
-```r
-rmarkdown::render("01_import_clean.Rmd")
-rmarkdown::render("02_exploration.Rmd")
-rmarkdown::render("03_analyses_statistiques.Rmd")
-rmarkdown::render("04_visualisations.Rmd")
