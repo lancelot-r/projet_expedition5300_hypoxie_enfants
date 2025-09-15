@@ -1,0 +1,2015 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+```{r}
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(tibble)
+library(officer)
+library(flextable)
+library(rstatix)
+library(stringr)
+```
+
+# Nutrition
+## Modèles linéaires simples Anemie - variables
+```{r}
+# Anemia nutrition
+df <- read.csv("data.csv")
+
+# Paramètres (déjà numériques)
+param_cols <- c(
+  "kCalHors.fibres",
+  "Pr..g.",
+  "L.g.",
+  "G.g.",
+  "Fibres",
+  "Calcium..mg.",
+  "Fer..mg.100.g.",
+  "Zinc..mg.100.g.",
+  "Vitamine.C..mg.",
+  "X..ENERGIE.RNP",
+  "X..CALCIUM...RNP",
+  "X..vit.C...RNP"
+)
+
+# Dictionnaire des libellés (sans recode)
+dict <- tibble::tibble(
+  param_raw = param_cols,
+  parametre = c(
+    "kCal (w/o Fibers)",
+    "Protein (g)",
+    "Lipids (g)",
+    "Carbohydrates (g)",
+    "Fibers",
+    "Calcium (mg)",
+    "Iron (mg/100g)",
+    "Zinc (mg/100g)",
+    "Vitamin C (mg)",
+    "% kCal RNP",
+    "% Calcium RNP",
+    "% Vitamin C RNP"
+  )
+)
+
+# Vos variables binaires
+binary_vars <- c(
+  "Anemie_OMS2024"
+  , "Anemie_OMS2011", "Anemie_OMS2024_FER", "Anemie_OMS2011_FER"
+)
+
+# Long format + libellés
+df_long <- df %>%
+  select(Age_categorie_binaire, Ville_eval, all_of(param_cols), all_of(binary_vars)) %>%
+  pivot_longer(cols = all_of(param_cols), names_to = "param_raw", values_to = "valeur") %>%
+  left_join(dict, by = "param_raw") %>%
+  select(-param_raw)
+
+# t-test robuste, avec formule construite dynamiquement
+ttest_for_binary <- function(data, bin_var) {
+  g <- data %>% filter(!is.na(valeur), !is.na(.data[[bin_var]]))
+  # Besoin de 2 modalités et au moins 1 obs par modalité
+  if (dplyr::n_distinct(g[[bin_var]]) != 2) {
+    return(tibble(variable_binaire = bin_var, p = NA_real_, n_total = nrow(g)))
+  }
+  # vérifier qu'on a au moins 1 obs par groupe
+  ng <- g %>% count(.data[[bin_var]], name = "n") %>% pull(n)
+  if (any(ng == 0)) {
+    return(tibble(variable_binaire = bin_var, p = NA_real_, n_total = nrow(g)))
+  }
+  pval <- tryCatch(
+    {
+      fml <- reformulate(termlabels = bin_var, response = "valeur")
+      t.test(fml, data = g)$p.value
+    },
+    error = function(e) NA_real_
+  )
+  tibble(variable_binaire = bin_var, p = pval, n_total = nrow(g))
+}
+
+# Calcul p-values pour (Âge × Ville × Paramètre × Var binaire)
+res <- df_long %>%
+  group_by(Age_categorie_binaire, Ville_eval, parametre) %>%
+  group_modify(function(data_group, key) {
+    map_dfr(binary_vars, function(bin) ttest_for_binary(data_group, bin))
+  }) %>%
+  ungroup() %>%
+  mutate(Significativite = case_when(
+    !is.na(p) & p < 0.001 ~ "***",
+    !is.na(p) & p < 0.01  ~ "**",
+    !is.na(p) & p < 0.05  ~ "*",
+    is.na(p)              ~ NA_character_,
+    TRUE                  ~ "ns"
+  ))
+
+# Table finale
+table_signif <- res %>%
+  transmute(
+    Age      = Age_categorie_binaire,
+    Ville    = Ville_eval,
+    Parametre = parametre,
+    Variable_binaire = variable_binaire,
+    Significativite
+  ) %>%
+  filter(Significativite %in% c("*", "**", "***")) %>%
+  arrange(Age, Ville, Parametre, Variable_binaire)
+
+# Charger ta table filtrée
+tab_flex <- flextable(table_signif)
+
+# Nouveau document PowerPoint
+doc <- read_pptx()
+
+# Ajouter une diapo avec titre + contenu
+doc <- add_slide(doc, layout = "Title and Content", master = "Office Theme")
+
+# Ajouter un titre
+doc <- ph_with(doc, "Significant results", location = ph_location_type(type = "title"))
+
+# Ajouter le tableau
+doc <- ph_with(doc, tab_flex, location = ph_location_type(type = "body"))
+
+# Sauvegarde
+print(doc, target = "resultats_significatifs.pptx")
+```
+
+## Modèles linéaires simples Polyglobulie - variables
+```{r}
+# Polyglobulie nutrition
+df <- read.csv("data.csv")
+
+# Paramètres (déjà numériques)
+param_cols <- c(
+  "kCalHors.fibres",
+  "Pr..g.",
+  "L.g.",
+  "G.g.",
+  "Fibres",
+  "Calcium..mg.",
+  "Fer..mg.100.g.",
+  "Zinc..mg.100.g.",
+  "Vitamine.C..mg.",
+  "X..ENERGIE.RNP",
+  "X..CALCIUM...RNP",
+  "X..vit.C...RNP"
+)
+
+# Dictionnaire des libellés (sans recode)
+dict <- tibble::tibble(
+  param_raw = param_cols,
+  parametre = c(
+    "kCal (w/o Fibers)",
+    "Protein (g)",
+    "Lipids (g)",
+    "Carbohydrates (g)",
+    "Fibers",
+    "Calcium (mg)",
+    "Iron (mg/100g)",
+    "Zinc (mg/100g)",
+    "Vitamin C (mg)",
+    "% kCal RNP",
+    "% Calcium RNP",
+    "% Vitamin C RNP"
+  )
+)
+
+# Vos variables binaires
+binary_vars <- c(
+  "Polyglobulie_Hb14.5_OMS2024"
+  , "Polyglobulie_Hb14.5_OMS2011"
+)
+
+# Long format + libellés
+df_long <- df %>%
+  select(Age_categorie_binaire, Ville_eval, all_of(param_cols), all_of(binary_vars)) %>%
+  pivot_longer(cols = all_of(param_cols), names_to = "param_raw", values_to = "valeur") %>%
+  left_join(dict, by = "param_raw") %>%
+  select(-param_raw)
+
+# t-test robuste, avec formule construite dynamiquement
+ttest_for_binary <- function(data, bin_var) {
+  g <- data %>% filter(!is.na(valeur), !is.na(.data[[bin_var]]))
+  # Besoin de 2 modalités et au moins 1 obs par modalité
+  if (dplyr::n_distinct(g[[bin_var]]) != 2) {
+    return(tibble(variable_binaire = bin_var, p = NA_real_, n_total = nrow(g)))
+  }
+  # vérifier qu'on a au moins 1 obs par groupe
+  ng <- g %>% count(.data[[bin_var]], name = "n") %>% pull(n)
+  if (any(ng == 0)) {
+    return(tibble(variable_binaire = bin_var, p = NA_real_, n_total = nrow(g)))
+  }
+  pval <- tryCatch(
+    {
+      fml <- reformulate(termlabels = bin_var, response = "valeur")
+      t.test(fml, data = g)$p.value
+    },
+    error = function(e) NA_real_
+  )
+  tibble(variable_binaire = bin_var, p = pval, n_total = nrow(g))
+}
+
+# Calcul p-values pour (Âge × Ville × Paramètre × Var binaire)
+res <- df_long %>%
+  group_by(Age_categorie_binaire, Ville_eval, parametre) %>%
+  group_modify(function(data_group, key) {
+    map_dfr(binary_vars, function(bin) ttest_for_binary(data_group, bin))
+  }) %>%
+  ungroup() %>%
+  mutate(Significativite = case_when(
+    !is.na(p) & p < 0.001 ~ "***",
+    !is.na(p) & p < 0.01  ~ "**",
+    !is.na(p) & p < 0.05  ~ "*",
+    is.na(p)              ~ NA_character_,
+    TRUE                  ~ "ns"
+  ))
+
+# Table finale
+table_signif <- res %>%
+  transmute(
+    Age      = Age_categorie_binaire,
+    Ville    = Ville_eval,
+    Parametre = parametre,
+    Variable_binaire = variable_binaire,
+    Significativite
+  ) %>%
+  filter(Significativite %in% c("*", "**", "***")) %>%
+  arrange(Age, Ville, Parametre, Variable_binaire)
+
+# Charger ta table filtrée
+tab_flex <- flextable(table_signif)
+
+# Nouveau document PowerPoint
+doc <- read_pptx()
+
+# Ajouter une diapo avec titre + contenu
+doc <- add_slide(doc, layout = "Title and Content", master = "Office Theme")
+
+# Ajouter un titre
+doc <- ph_with(doc, "Significant results", location = ph_location_type(type = "title"))
+
+# Ajouter le tableau
+doc <- ph_with(doc, tab_flex, location = ph_location_type(type = "body"))
+
+# Sauvegarde
+print(doc, target = "resultats_significatifs.pptx")
+```
+
+## Modèles linéaires simples QUANTITATIF - variables
+```{r}
+vars_expliquees <- c("HB", "HCT..", "Hb.mass.kg..g...kg.", "ERFE..ng.mL.", "CRP..mg.L.", "FER..micromol.L.", "FERRITINE..microg.L.", "TRANSFERINE..g.L.", "RECEPTEUR.TRANSFERINE..mg.L.", "Body.iron", "Vit.B9", "Vit.B12")
+
+# Fonction pour lancer un modèle linéaire simple
+lm_for_var <- function(data, y_var, x_var) {
+  g <- data %>% filter(!is.na(.data[[y_var]]), !is.na(.data[[x_var]]))
+  
+  if (nrow(g) < 3) {
+    return(tibble(
+      Variable_expliquee = y_var,
+      Parametre = x_var,
+      Estimate = NA_real_,
+      Pvalue = NA_real_,
+      R2       = NA_real_,
+      N = nrow(g)
+    ))
+  }
+  
+  fml <- reformulate(termlabels = x_var, response = y_var)
+  mod <- tryCatch(lm(fml, data = g), error = function(e) NULL)
+  if (is.null(mod)) {
+    return(tibble(
+      Variable_expliquee = y_var,
+      Parametre = x_var,
+      Estimate = NA_real_,
+      Pvalue = NA_real_,
+      R2       = NA_real_,
+      N = nrow(g)
+    ))
+  }
+  
+  coefs <- summary(mod)$coefficients
+  tibble(
+    Variable_expliquee = y_var,
+    Parametre = x_var,
+    Estimate = round(coefs[x_var, "Estimate"],6),
+    Pvalue   = round(coefs[x_var, "Pr(>|t|)"],3),
+    R2       = round(summary(mod)$r.squared,3),
+    N        = nrow(g)
+  )
+}
+
+# Application
+res_lm <- map_dfr(vars_expliquees, function(y) {
+  map_dfr(param_cols, function(x) lm_for_var(df, y, x))
+})
+
+# Ajouter significativité
+res_lm <- res_lm %>%
+  mutate(Significativite = case_when(
+    !is.na(Pvalue) & Pvalue < 0.001 ~ "***",
+    !is.na(Pvalue) & Pvalue < 0.01  ~ "**",
+    !is.na(Pvalue) & Pvalue < 0.05  ~ "*",
+    is.na(Pvalue)                   ~ NA_character_,
+    TRUE                            ~ "ns"
+  ))
+
+# Table finale
+table_lm <- res_lm %>%
+  filter(Significativite %in% c("*", "**", "***")) %>%
+  arrange(Variable_expliquee, Parametre)
+
+# Export PowerPoint
+tab_flex <- flextable(table_lm)
+doc <- read_pptx()
+doc <- add_slide(doc, layout = "Title and Content", master = "Office Theme")
+doc <- ph_with(doc, "Linear models results", location = ph_location_type(type = "title"))
+doc <- ph_with(doc, tab_flex, location = ph_location_type(type = "body"))
+print(doc, target = "lm_resultats.pptx")
+```
+
+## Modèles linéaires simples QUALITATIF - variables
+```{r}
+vars_expliquees <- c(
+  "kCalHors.fibres",
+  "Pr..g.",
+  "L.g.",
+  "G.g.",
+  "Fibres",
+  "Calcium..mg.",
+  "Fer..mg.100.g.",
+  "Zinc..mg.100.g.",
+  "Vitamine.C..mg.",
+  "X..ENERGIE.RNP",
+  "X..CALCIUM...RNP",
+  "X..vit.C...RNP"
+)
+
+param_cols <- c("Anemie_OMS2011","Anemie_OMS2024", "Anemie_OMS2011_FER", "Anemie_OMS2024_FER", "Polyglobulie_Hb14.5_OMS2011", "Polyglobulie_Hb14.5_OMS2024")
+
+# Fonction pour lancer un modèle linéaire simple
+to_binary01 <- function(x) {
+  # si déjà logique
+  if (is.logical(x)) return(as.integer(x))
+  # si numérique avec seulement 0/1 (en ignorant NA)
+  if (is.numeric(x)) {
+    ux <- sort(unique(x[!is.na(x)]))
+    if (length(ux) <= 2 && all(ux %in% c(0,1))) return(as.numeric(x))
+  }
+  # si caractère : normaliser en minuscule sans espace
+  if (is.character(x)) {
+    xc <- trimws(tolower(x))
+    oui <- xc %in% c("oui","yes","true","vrai","1","y","o")
+    non <- xc %in% c("non","no","false","faux","0","n")
+    # si on couvre (quasi) tout en oui/non
+    if (all(oui | non | is.na(xc))) return(ifelse(oui, 1, ifelse(non, 0, NA_real_)))
+  }
+  # si facteur : à 2 niveaux → 0 pour le 1er niveau, 1 pour le 2e
+  if (is.factor(x)) {
+    lv <- levels(x)
+    if (length(lv) == 2) return(as.integer(x == lv[2]))
+  }
+  # autrement, renvoie NULL (non binaire)
+  NULL
+}
+
+lm_for_var <- function(data, y_var, x_var) {
+  if (!(y_var %in% names(data)) || !(x_var %in% names(data))) {
+    return(tibble::tibble(
+      Variable_expliquee = y_var, Parametre = x_var,
+      Estimate = NA_real_, Pvalue = NA_real_, R2 = NA_real_, R2_adj = NA_real_, N = 0
+    ))
+  }
+
+  y <- data[[y_var]]
+  x <- data[[x_var]]
+
+  # Tenter conversion binaire 0/1 si le prédicteur n'est pas numérique utilisable
+  x01 <- to_binary01(x)
+  if (!is.null(x01)) {
+    x <- x01
+  } else if (!is.numeric(x)) {
+    # prédicteur catégoriel à >2 niveaux : on ne fait pas de lm simple (1 seul coef)
+    return(tibble::tibble(
+      Variable_expliquee = y_var, Parametre = x_var,
+      Estimate = NA_real_, Pvalue = NA_real_, R2 = NA_real_, R2_adj = NA_real_,
+      N = sum(stats::complete.cases(y, x))
+    ))
+  }
+
+  # lignes complètes
+  ok <- stats::complete.cases(y, x)
+  y <- y[ok]; x <- x[ok]
+
+  if (length(y) < 3) {
+    return(tibble::tibble(
+      Variable_expliquee = y_var, Parametre = x_var,
+      Estimate = NA_real_, Pvalue = NA_real_, R2 = NA_real_, R2_adj = NA_real_, N = length(y)
+    ))
+  }
+
+  # modèle simple y ~ x (x numérique ou 0/1)
+  mod <- tryCatch(stats::lm(y ~ x), error = function(e) NULL)
+  if (is.null(mod)) {
+    return(tibble::tibble(
+      Variable_expliquee = y_var, Parametre = x_var,
+      Estimate = NA_real_, Pvalue = NA_real_, R2 = NA_real_, R2_adj = NA_real_, N = length(y)
+    ))
+  }
+
+  sm <- summary(mod)
+  coefs <- sm$coefficients
+  # La ligne du prédicteur s'appelle toujours "x" dans ce montage
+  if (!"x" %in% rownames(coefs)) {
+    return(tibble::tibble(
+      Variable_expliquee = y_var, Parametre = x_var,
+      Estimate = NA_real_, Pvalue = NA_real_, R2 = sm$r.squared, R2_adj = sm$adj.r.squared, N = length(y)
+    ))
+  }
+
+  tibble::tibble(
+    Variable_expliquee = y_var,
+    Parametre = x_var,
+    Estimate = unname(round(coefs["x", "Estimate"], 6)),
+    Pvalue   = unname(round(coefs["x", "Pr(>|t|)"], 3)),
+    R2       = round(sm$r.squared, 3),
+    N        = length(y)
+  )
+}
+
+# Application
+res_lm <- map_dfr(vars_expliquees, function(y) {
+  map_dfr(param_cols, function(x) lm_for_var(df, y, x))
+})
+
+# Ajouter significativité
+res_lm <- res_lm %>%
+  mutate(Significativite = case_when(
+    !is.na(Pvalue) & Pvalue < 0.001 ~ "***",
+    !is.na(Pvalue) & Pvalue < 0.01  ~ "**",
+    !is.na(Pvalue) & Pvalue < 0.05  ~ "*",
+    is.na(Pvalue)                   ~ NA_character_,
+    TRUE                            ~ "ns"
+  ))
+
+# Table finale
+table_lm <- res_lm %>%
+  filter(Significativite %in% c("*", "**", "***")) %>%
+  arrange(Variable_expliquee, Parametre)
+
+# Export PowerPoint
+tab_flex <- flextable(table_lm)
+doc <- read_pptx()
+doc <- add_slide(doc, layout = "Title and Content", master = "Office Theme")
+doc <- ph_with(doc, "Linear models results", location = ph_location_type(type = "title"))
+doc <- ph_with(doc, tab_flex, location = ph_location_type(type = "body"))
+print(doc, target = "lm_resultats.pptx")
+```
+
+
+# Neuro
+## Modèles linéaires simples Anemie - variables
+```{r}
+# Anemia neuro
+df <- read.csv("data.csv")
+
+# Paramètres (déjà numériques)
+param_cols <- c(
+  # inhibition_flex
+  "Inhibicion", "Inhibicion_Nota_T",
+  "Supervision_Si_Mismo", "Supervision_Si_Mismo_Nota_T",
+  "Flexibilidad", "Flexibilidad_Nota_T",
+  "Control_Emocional", "Control_Emocional_Nota_T",
+  
+  # exec_memoire
+  "Iniciativa", "Iniciativa_Nota_T",
+  "Memoria_Trabajo", "Memoria_Trabajo_Nota_T",
+  "Planificacion_Organizacion", "Planificacion_Organizacion_Nota_T",
+  "Supervision_Tarea", "Supervision_Tarea_Nota_T",
+  
+  # organisation_brief
+  "Organizacion_Materiales", "Organizacion_Materiales_Nota_T",
+  "BRIEF_IFL", "BRIEF_IFL_Nota_T",
+  "BRIEF_IME", "BRIEF_IME_Nota_T",
+  "BRIEF_IGFE", "BRIEF_IGFE_Nota_T",
+  
+  # brief2_composites
+  "BRIEF2_IRCN", "BRIEF2_IRCN_Nota_T",
+  "BRIEF2_IREM", "BRIEF2_IREM_Nota_T",
+  "BRIEF2_IRCG", "BRIEF2_IRCG_Nota_T",
+  "BRIEF2_IGE", "BRIEF2_IGE_Nota_T",
+  
+  # matrices_codes
+  "DS_Matrice", "QI_Matrice",
+  "DS_Code", "QI_Code",
+  "DS_Barrage_partie_1", "DS_Barrage_partie_2", "QI_Barrage",
+  
+  # labyrinthe
+  "DS_Labyrinthe", "QI_Labyrinthe",
+  
+  # purdue_main
+  "DS_Purdue_Main_Dominante", "MD_Z",
+  "DS_Purdue_Main_Non_Dominante", "MND_Z",
+  "DS_Purdue_Coordination", "Coordination_Z",
+  "DS_Purdue_Assemblage", "Assemblage_Z"
+)
+
+dict <- tibble::tibble(
+  param_raw = param_cols,
+  parametre = c(
+    # inhibition_flex
+    "Inhibition", "Inhibition (T-score)",
+    "Self-Monitoring", "Self-Monitoring (T-score)",
+    "Flexibility", "Flexibility (T-score)",
+    "Emotional Control", "Emotional Control (T-score)",
+    
+    # exec_memoire
+    "Initiative", "Initiative (T-score)",
+    "Working Memory", "Working Memory (T-score)",
+    "Planning & Organization", "Planning & Organization (T-score)",
+    "Task Monitoring", "Task Monitoring (T-score)",
+    
+    # organisation_brief
+    "Organization of Materials", "Organization of Materials (T-score)",
+    "BRIEF IFL", "BRIEF IFL (T-score)",
+    "BRIEF IME", "BRIEF IME (T-score)",
+    "BRIEF IGFE", "BRIEF IGFE (T-score)",
+    
+    # brief2_composites
+    "BRIEF2 IRCN", "BRIEF2 IRCN (T-score)",
+    "BRIEF2 IREM", "BRIEF2 IREM (T-score)",
+    "BRIEF2 IRCG", "BRIEF2 IRCG (T-score)",
+    "BRIEF2 IGE", "BRIEF2 IGE (T-score)",
+    
+    # matrices_codes
+    "Matrix (DS)", "Matrix IQ",
+    "Coding (DS)", "Coding IQ",
+    "Cancellation Part 1 (DS)", "Cancellation Part 2 (DS)", "Cancellation IQ",
+    
+    # labyrinthe
+    "Maze (DS)", "Maze IQ",
+    
+    # purdue_main
+    "Purdue Dominant Hand (DS)", "Purdue Dominant Hand (Z)",
+    "Purdue Non-Dominant Hand (DS)", "Purdue Non-Dominant Hand (Z)",
+    "Purdue Coordination (DS)", "Purdue Coordination (Z)",
+    "Purdue Assembly (DS)", "Purdue Assembly (Z)"
+  )
+)
+
+# Vos variables binaires
+binary_vars <- c(
+  "Anemie_OMS2024"
+  , "Anemie_OMS2011", "Anemie_OMS2024_FER", "Anemie_OMS2011_FER"
+)
+
+# Long format + libellés
+df_long <- df %>%
+  select(Age_categorie_binaire, Ville_eval, all_of(param_cols), all_of(binary_vars)) %>%
+  pivot_longer(cols = all_of(param_cols), names_to = "param_raw", values_to = "valeur") %>%
+  left_join(dict, by = "param_raw") %>%
+  select(-param_raw)
+
+# t-test robuste, avec formule construite dynamiquement
+ttest_for_binary <- function(data, bin_var) {
+  g <- data %>% filter(!is.na(valeur), !is.na(.data[[bin_var]]))
+  # Besoin de 2 modalités et au moins 1 obs par modalité
+  if (dplyr::n_distinct(g[[bin_var]]) != 2) {
+    return(tibble(variable_binaire = bin_var, p = NA_real_, n_total = nrow(g)))
+  }
+  # vérifier qu'on a au moins 1 obs par groupe
+  ng <- g %>% count(.data[[bin_var]], name = "n") %>% pull(n)
+  if (any(ng == 0)) {
+    return(tibble(variable_binaire = bin_var, p = NA_real_, n_total = nrow(g)))
+  }
+  pval <- tryCatch(
+    {
+      fml <- reformulate(termlabels = bin_var, response = "valeur")
+      t.test(fml, data = g)$p.value
+    },
+    error = function(e) NA_real_
+  )
+  tibble(variable_binaire = bin_var, p = pval, n_total = nrow(g))
+}
+
+# Calcul p-values pour (Âge × Ville × Paramètre × Var binaire)
+res <- df_long %>%
+  group_by(Age_categorie_binaire, Ville_eval, parametre) %>%
+  group_modify(function(data_group, key) {
+    map_dfr(binary_vars, function(bin) ttest_for_binary(data_group, bin))
+  }) %>%
+  ungroup() %>%
+  mutate(Significativite = case_when(
+    !is.na(p) & p < 0.001 ~ "***",
+    !is.na(p) & p < 0.01  ~ "**",
+    !is.na(p) & p < 0.05  ~ "*",
+    is.na(p)              ~ NA_character_,
+    TRUE                  ~ "ns"
+  ))
+
+# Table finale
+table_signif <- res %>%
+  transmute(
+    Age      = Age_categorie_binaire,
+    Ville    = Ville_eval,
+    Parametre = parametre,
+    Variable_binaire = variable_binaire,
+    Significativite
+  ) %>%
+  filter(Significativite %in% c("*", "**", "***")) %>%
+  arrange(Age, Ville, Parametre, Variable_binaire)
+
+# Charger ta table filtrée
+tab_flex <- flextable(table_signif)
+
+# Nouveau document PowerPoint
+doc <- read_pptx()
+
+# Ajouter une diapo avec titre + contenu
+doc <- add_slide(doc, layout = "Title and Content", master = "Office Theme")
+
+# Ajouter un titre
+doc <- ph_with(doc, "Significant results", location = ph_location_type(type = "title"))
+
+# Ajouter le tableau
+doc <- ph_with(doc, tab_flex, location = ph_location_type(type = "body"))
+
+# Sauvegarde
+print(doc, target = "resultats_significatifs.pptx")
+```
+
+## Modèles linéaires simples Polyglobulie - variables
+```{r}
+# Polyglobulie nutrition
+df <- read.csv("data.csv")
+
+# Paramètres (déjà numériques)
+# Paramètres (déjà numériques)
+param_cols <- c(
+  # inhibition_flex
+  "Inhibicion", "Inhibicion_Nota_T",
+  "Supervision_Si_Mismo", "Supervision_Si_Mismo_Nota_T",
+  "Flexibilidad", "Flexibilidad_Nota_T",
+  "Control_Emocional", "Control_Emocional_Nota_T",
+  
+  # exec_memoire
+  "Iniciativa", "Iniciativa_Nota_T",
+  "Memoria_Trabajo", "Memoria_Trabajo_Nota_T",
+  "Planificacion_Organizacion", "Planificacion_Organizacion_Nota_T",
+  "Supervision_Tarea", "Supervision_Tarea_Nota_T",
+  
+  # organisation_brief
+  "Organizacion_Materiales", "Organizacion_Materiales_Nota_T",
+  "BRIEF_IFL", "BRIEF_IFL_Nota_T",
+  "BRIEF_IME", "BRIEF_IME_Nota_T",
+  "BRIEF_IGFE", "BRIEF_IGFE_Nota_T",
+  
+  # brief2_composites
+  "BRIEF2_IRCN", "BRIEF2_IRCN_Nota_T",
+  "BRIEF2_IREM", "BRIEF2_IREM_Nota_T",
+  "BRIEF2_IRCG", "BRIEF2_IRCG_Nota_T",
+  "BRIEF2_IGE", "BRIEF2_IGE_Nota_T",
+  
+  # matrices_codes
+  "DS_Matrice", "QI_Matrice",
+  "DS_Code", "QI_Code",
+  "DS_Barrage_partie_1", "DS_Barrage_partie_2", "QI_Barrage",
+  
+  # labyrinthe
+  "DS_Labyrinthe", "QI_Labyrinthe",
+  
+  # purdue_main
+  "DS_Purdue_Main_Dominante", "MD_Z",
+  "DS_Purdue_Main_Non_Dominante", "MND_Z",
+  "DS_Purdue_Coordination", "Coordination_Z",
+  "DS_Purdue_Assemblage", "Assemblage_Z"
+)
+
+dict <- tibble::tibble(
+  param_raw = param_cols,
+  parametre = c(
+    # inhibition_flex
+    "Inhibition", "Inhibition (T-score)",
+    "Self-Monitoring", "Self-Monitoring (T-score)",
+    "Flexibility", "Flexibility (T-score)",
+    "Emotional Control", "Emotional Control (T-score)",
+    
+    # exec_memoire
+    "Initiative", "Initiative (T-score)",
+    "Working Memory", "Working Memory (T-score)",
+    "Planning & Organization", "Planning & Organization (T-score)",
+    "Task Monitoring", "Task Monitoring (T-score)",
+    
+    # organisation_brief
+    "Organization of Materials", "Organization of Materials (T-score)",
+    "BRIEF IFL", "BRIEF IFL (T-score)",
+    "BRIEF IME", "BRIEF IME (T-score)",
+    "BRIEF IGFE", "BRIEF IGFE (T-score)",
+    
+    # brief2_composites
+    "BRIEF2 IRCN", "BRIEF2 IRCN (T-score)",
+    "BRIEF2 IREM", "BRIEF2 IREM (T-score)",
+    "BRIEF2 IRCG", "BRIEF2 IRCG (T-score)",
+    "BRIEF2 IGE", "BRIEF2 IGE (T-score)",
+    
+    # matrices_codes
+    "Matrix (DS)", "Matrix IQ",
+    "Coding (DS)", "Coding IQ",
+    "Cancellation Part 1 (DS)", "Cancellation Part 2 (DS)", "Cancellation IQ",
+    
+    # labyrinthe
+    "Maze (DS)", "Maze IQ",
+    
+    # purdue_main
+    "Purdue Dominant Hand (DS)", "Purdue Dominant Hand (Z)",
+    "Purdue Non-Dominant Hand (DS)", "Purdue Non-Dominant Hand (Z)",
+    "Purdue Coordination (DS)", "Purdue Coordination (Z)",
+    "Purdue Assembly (DS)", "Purdue Assembly (Z)"
+  )
+)
+
+# Vos variables binaires
+binary_vars <- c(
+  "Polyglobulie_Hb14.5_OMS2024"
+  , "Polyglobulie_Hb14.5_OMS2011"
+)
+
+# Long format + libellés
+df_long <- df %>%
+  select(Age_categorie_binaire, Ville_eval, all_of(param_cols), all_of(binary_vars)) %>%
+  pivot_longer(cols = all_of(param_cols), names_to = "param_raw", values_to = "valeur") %>%
+  left_join(dict, by = "param_raw") %>%
+  select(-param_raw)
+
+# t-test robuste, avec formule construite dynamiquement
+ttest_for_binary <- function(data, bin_var) {
+  g <- data %>% filter(!is.na(valeur), !is.na(.data[[bin_var]]))
+  # Besoin de 2 modalités et au moins 1 obs par modalité
+  if (dplyr::n_distinct(g[[bin_var]]) != 2) {
+    return(tibble(variable_binaire = bin_var, p = NA_real_, n_total = nrow(g)))
+  }
+  # vérifier qu'on a au moins 1 obs par groupe
+  ng <- g %>% count(.data[[bin_var]], name = "n") %>% pull(n)
+  if (any(ng == 0)) {
+    return(tibble(variable_binaire = bin_var, p = NA_real_, n_total = nrow(g)))
+  }
+  pval <- tryCatch(
+    {
+      fml <- reformulate(termlabels = bin_var, response = "valeur")
+      t.test(fml, data = g)$p.value
+    },
+    error = function(e) NA_real_
+  )
+  tibble(variable_binaire = bin_var, p = pval, n_total = nrow(g))
+}
+
+# Calcul p-values pour (Âge × Ville × Paramètre × Var binaire)
+res <- df_long %>%
+  group_by(Age_categorie_binaire, Ville_eval, parametre) %>%
+  group_modify(function(data_group, key) {
+    map_dfr(binary_vars, function(bin) ttest_for_binary(data_group, bin))
+  }) %>%
+  ungroup() %>%
+  mutate(Significativite = case_when(
+    !is.na(p) & p < 0.001 ~ "***",
+    !is.na(p) & p < 0.01  ~ "**",
+    !is.na(p) & p < 0.05  ~ "*",
+    is.na(p)              ~ NA_character_,
+    TRUE                  ~ "ns"
+  ))
+
+# Table finale
+table_signif <- res %>%
+  transmute(
+    Age      = Age_categorie_binaire,
+    Ville    = Ville_eval,
+    Parametre = parametre,
+    Variable_binaire = variable_binaire,
+    Significativite
+  ) %>%
+  filter(Significativite %in% c("*", "**", "***")) %>%
+  arrange(Age, Ville, Parametre, Variable_binaire)
+
+# Charger ta table filtrée
+tab_flex <- flextable(table_signif)
+
+# Nouveau document PowerPoint
+doc <- read_pptx()
+
+# Ajouter une diapo avec titre + contenu
+doc <- add_slide(doc, layout = "Title and Content", master = "Office Theme")
+
+# Ajouter un titre
+doc <- ph_with(doc, "Significant results", location = ph_location_type(type = "title"))
+
+# Ajouter le tableau
+doc <- ph_with(doc, tab_flex, location = ph_location_type(type = "body"))
+
+# Sauvegarde
+print(doc, target = "resultats_significatifs.pptx")
+```
+
+## Modèles linéaires simples QUANTITATIF - variables
+```{r}
+vars_expliquees <- c("HB", "HCT..", "Hb.mass.kg..g...kg.", "ERFE..ng.mL.", "CRP..mg.L.", "FER..micromol.L.", "FERRITINE..microg.L.", "TRANSFERINE..g.L.", "RECEPTEUR.TRANSFERINE..mg.L.", "Body.iron", "Vit.B9", "Vit.B12")
+
+# Fonction pour lancer un modèle linéaire simple
+lm_for_var <- function(data, y_var, x_var) {
+  g <- data %>% filter(!is.na(.data[[y_var]]), !is.na(.data[[x_var]]))
+  
+  if (nrow(g) < 3) {
+    return(tibble(
+      Variable_expliquee = y_var,
+      Parametre = x_var,
+      Estimate = NA_real_,
+      Pvalue = NA_real_,
+      R2       = NA_real_,
+      N = nrow(g)
+    ))
+  }
+  
+  fml <- reformulate(termlabels = x_var, response = y_var)
+  mod <- tryCatch(lm(fml, data = g), error = function(e) NULL)
+  if (is.null(mod)) {
+    return(tibble(
+      Variable_expliquee = y_var,
+      Parametre = x_var,
+      Estimate = NA_real_,
+      Pvalue = NA_real_,
+      R2       = NA_real_,
+      N = nrow(g)
+    ))
+  }
+  
+  coefs <- summary(mod)$coefficients
+  tibble(
+    Variable_expliquee = y_var,
+    Parametre = x_var,
+    Estimate = round(coefs[x_var, "Estimate"],6),
+    Pvalue   = round(coefs[x_var, "Pr(>|t|)"],3),
+    R2       = round(summary(mod)$r.squared,3),
+    N        = nrow(g)
+  )
+}
+
+# Application
+res_lm <- map_dfr(vars_expliquees, function(y) {
+  map_dfr(param_cols, function(x) lm_for_var(df, y, x))
+})
+
+# Ajouter significativité
+res_lm <- res_lm %>%
+  mutate(Significativite = case_when(
+    !is.na(Pvalue) & Pvalue < 0.001 ~ "***",
+    !is.na(Pvalue) & Pvalue < 0.01  ~ "**",
+    !is.na(Pvalue) & Pvalue < 0.05  ~ "*",
+    is.na(Pvalue)                   ~ NA_character_,
+    TRUE                            ~ "ns"
+  ))
+
+# Table finale
+table_lm <- res_lm %>%
+  filter(Significativite %in% c("*", "**", "***")) %>%
+  arrange(Variable_expliquee, Parametre)
+
+# Export PowerPoint
+tab_flex <- flextable(table_lm)
+doc <- read_pptx()
+doc <- add_slide(doc, layout = "Title and Content", master = "Office Theme")
+doc <- ph_with(doc, "Linear models results", location = ph_location_type(type = "title"))
+doc <- ph_with(doc, tab_flex, location = ph_location_type(type = "body"))
+print(doc, target = "lm_resultats.pptx")
+```
+
+## Modèles linéaires simples QUALITATIF - variables
+```{r}
+vars_expliquees <- c(
+  # inhibition_flex
+  "Inhibicion", "Inhibicion_Nota_T",
+  "Supervision_Si_Mismo", "Supervision_Si_Mismo_Nota_T",
+  "Flexibilidad", "Flexibilidad_Nota_T",
+  "Control_Emocional", "Control_Emocional_Nota_T",
+  
+  # exec_memoire
+  "Iniciativa", "Iniciativa_Nota_T",
+  "Memoria_Trabajo", "Memoria_Trabajo_Nota_T",
+  "Planificacion_Organizacion", "Planificacion_Organizacion_Nota_T",
+  "Supervision_Tarea", "Supervision_Tarea_Nota_T",
+  
+  # organisation_brief
+  "Organizacion_Materiales", "Organizacion_Materiales_Nota_T",
+  "BRIEF_IFL", "BRIEF_IFL_Nota_T",
+  "BRIEF_IME", "BRIEF_IME_Nota_T",
+  "BRIEF_IGFE", "BRIEF_IGFE_Nota_T",
+  
+  # brief2_composites
+  "BRIEF2_IRCN", "BRIEF2_IRCN_Nota_T",
+  "BRIEF2_IREM", "BRIEF2_IREM_Nota_T",
+  "BRIEF2_IRCG", "BRIEF2_IRCG_Nota_T",
+  "BRIEF2_IGE", "BRIEF2_IGE_Nota_T",
+  
+  # matrices_codes
+  "DS_Matrice", "QI_Matrice",
+  "DS_Code", "QI_Code",
+  "DS_Barrage_partie_1", "DS_Barrage_partie_2", "QI_Barrage",
+  
+  # labyrinthe
+  "DS_Labyrinthe", "QI_Labyrinthe",
+  
+  # purdue_main
+  "DS_Purdue_Main_Dominante", "MD_Z",
+  "DS_Purdue_Main_Non_Dominante", "MND_Z",
+  "DS_Purdue_Coordination", "Coordination_Z",
+  "DS_Purdue_Assemblage", "Assemblage_Z"
+)
+
+param_cols <- c("Anemie_OMS2011","Anemie_OMS2024", "Anemie_OMS2011_FER", "Anemie_OMS2024_FER", "Polyglobulie_Hb14.5_OMS2011", "Polyglobulie_Hb14.5_OMS2024")
+
+# Fonction pour lancer un modèle linéaire simple
+to_binary01 <- function(x) {
+  # si déjà logique
+  if (is.logical(x)) return(as.integer(x))
+  # si numérique avec seulement 0/1 (en ignorant NA)
+  if (is.numeric(x)) {
+    ux <- sort(unique(x[!is.na(x)]))
+    if (length(ux) <= 2 && all(ux %in% c(0,1))) return(as.numeric(x))
+  }
+  # si caractère : normaliser en minuscule sans espace
+  if (is.character(x)) {
+    xc <- trimws(tolower(x))
+    oui <- xc %in% c("oui","yes","true","vrai","1","y","o")
+    non <- xc %in% c("non","no","false","faux","0","n")
+    # si on couvre (quasi) tout en oui/non
+    if (all(oui | non | is.na(xc))) return(ifelse(oui, 1, ifelse(non, 0, NA_real_)))
+  }
+  # si facteur : à 2 niveaux → 0 pour le 1er niveau, 1 pour le 2e
+  if (is.factor(x)) {
+    lv <- levels(x)
+    if (length(lv) == 2) return(as.integer(x == lv[2]))
+  }
+  # autrement, renvoie NULL (non binaire)
+  NULL
+}
+
+lm_for_var <- function(data, y_var, x_var) {
+  if (!(y_var %in% names(data)) || !(x_var %in% names(data))) {
+    return(tibble::tibble(
+      Variable_expliquee = y_var, Parametre = x_var,
+      Estimate = NA_real_, Pvalue = NA_real_, R2 = NA_real_, R2_adj = NA_real_, N = 0
+    ))
+  }
+
+  y <- data[[y_var]]
+  x <- data[[x_var]]
+
+  # Tenter conversion binaire 0/1 si le prédicteur n'est pas numérique utilisable
+  x01 <- to_binary01(x)
+  if (!is.null(x01)) {
+    x <- x01
+  } else if (!is.numeric(x)) {
+    # prédicteur catégoriel à >2 niveaux : on ne fait pas de lm simple (1 seul coef)
+    return(tibble::tibble(
+      Variable_expliquee = y_var, Parametre = x_var,
+      Estimate = NA_real_, Pvalue = NA_real_, R2 = NA_real_, R2_adj = NA_real_,
+      N = sum(stats::complete.cases(y, x))
+    ))
+  }
+
+  # lignes complètes
+  ok <- stats::complete.cases(y, x)
+  y <- y[ok]; x <- x[ok]
+
+  if (length(y) < 3) {
+    return(tibble::tibble(
+      Variable_expliquee = y_var, Parametre = x_var,
+      Estimate = NA_real_, Pvalue = NA_real_, R2 = NA_real_, R2_adj = NA_real_, N = length(y)
+    ))
+  }
+
+  # modèle simple y ~ x (x numérique ou 0/1)
+  mod <- tryCatch(stats::lm(y ~ x), error = function(e) NULL)
+  if (is.null(mod)) {
+    return(tibble::tibble(
+      Variable_expliquee = y_var, Parametre = x_var,
+      Estimate = NA_real_, Pvalue = NA_real_, R2 = NA_real_, R2_adj = NA_real_, N = length(y)
+    ))
+  }
+
+  sm <- summary(mod)
+  coefs <- sm$coefficients
+  # La ligne du prédicteur s'appelle toujours "x" dans ce montage
+  if (!"x" %in% rownames(coefs)) {
+    return(tibble::tibble(
+      Variable_expliquee = y_var, Parametre = x_var,
+      Estimate = NA_real_, Pvalue = NA_real_, R2 = sm$r.squared, R2_adj = sm$adj.r.squared, N = length(y)
+    ))
+  }
+
+  tibble::tibble(
+    Variable_expliquee = y_var,
+    Parametre = x_var,
+    Estimate = unname(round(coefs["x", "Estimate"], 6)),
+    Pvalue   = unname(round(coefs["x", "Pr(>|t|)"], 3)),
+    R2       = round(sm$r.squared, 3),
+    N        = length(y)
+  )
+}
+
+# Application
+res_lm <- map_dfr(vars_expliquees, function(y) {
+  map_dfr(param_cols, function(x) lm_for_var(df, y, x))
+})
+
+# Ajouter significativité
+res_lm <- res_lm %>%
+  mutate(Significativite = case_when(
+    !is.na(Pvalue) & Pvalue < 0.001 ~ "***",
+    !is.na(Pvalue) & Pvalue < 0.01  ~ "**",
+    !is.na(Pvalue) & Pvalue < 0.05  ~ "*",
+    is.na(Pvalue)                   ~ NA_character_,
+    TRUE                            ~ "ns"
+  ))
+
+# Table finale
+table_lm <- res_lm %>%
+  filter(Significativite %in% c("*", "**", "***")) %>%
+  arrange(Variable_expliquee, Parametre)
+
+# Export PowerPoint
+tab_flex <- flextable(table_lm)
+doc <- read_pptx()
+doc <- add_slide(doc, layout = "Title and Content", master = "Office Theme")
+doc <- ph_with(doc, "Linear models results", location = ph_location_type(type = "title"))
+doc <- ph_with(doc, tab_flex, location = ph_location_type(type = "body"))
+print(doc, target = "lm_resultats.pptx")
+```
+
+
+# Coeur
+## Modèles linéaires simples Anemie - variables
+```{r}
+# Anemia neuro
+df <- read.csv("data.csv")
+
+# Paramètres (déjà numériques)
+param_cols <- c(
+  # cardiaque1
+  "SC", "PAS", "PAD", "PAM", "FC", "DC", "IC", "TVR", "PAPm",
+  
+  # cardiaque2
+  "DTDVG", "DTSVG", "VTDVG", "DTDVGi", "DTSVGi", "VTDVGi", "PP", "RWT", "masseVG",
+  
+  # cardiaque3
+  "FEVG..teich.", "vol.ej..teich.", "FEVG.auto", "GLS.VG", "CCVG", "vol.éj..CCVG.", "h.r", "ITVSSAo", "DC",
+  
+  # cardiaque4
+  "diam.OG", "ao.og", "surf.OG", "vol.OG", "surf.OG.ind", "vol.OG.ind",
+  
+  # cardiaque5
+  "E.mit", "A.mit", "E.A.mit", "TDM.Emit", "E..lat", "E.e..mit",
+  
+  # cardiaque6
+  "STDVD", "STSVD", "STDVDi", "STSVDi", "FR.VD", "strain.VD", "TAPSE",
+  
+  # cardiaque7
+  "surf.OD", "vol.OD", "surf.OD.ind", "vol.OD.ind",
+  
+  # cardiaque8
+  "E.tric", "A.tric", "E.A.tric", "TDM.Etric", "onde.S.tric",
+  
+  # cardiaque9
+  "PAPs", "PAPm", "vitesse.IT", "ITV.pulm", "Tacc.pulm"
+)
+
+dict <- tibble::tibble(
+  param_raw = param_cols,
+  parametre = c(
+    # cardiaque1
+    "Body Surface Area (BSA)", "Systolic BP (mmHg)", "Diastolic BP (mmHg)", "Mean Arterial Pressure (mmHg)",
+    "Heart Rate (bpm)", "Cardiac Output (L/min)", "Cardiac Index (L/min/m²)",
+    "Systemic Vascular Resistance", "Mean Pulmonary Artery Pressure (mmHg)",
+    
+    # cardiaque2
+    "LV End-Diastolic Diameter (mm)", "LV End-Systolic Diameter (mm)", "LV End-Diastolic Volume (mL)",
+    "Indexed LV End-Diastolic Diameter", "Indexed LV End-Systolic Diameter", "Indexed LV End-Diastolic Volume",
+    "Posterior Wall Thickness (mm)", "Relative Wall Thickness", "LV Mass (g)",
+    
+    # cardiaque3
+    "LVEF (Teichholz)", "Stroke Volume (Teichholz)", "LVEF (Auto)", "LV Global Longitudinal Strain",
+    "LV Shortening Fraction", "Stroke Volume (Shortening Fraction)", "Heart Rate",
+    "LVOT VTI", "Cardiac Output (L/min)",
+    
+    # cardiaque4
+    "LA Diameter (mm)", "Ao/LA Ratio", "LA Surface Area (cm²)", "LA Volume (mL)",
+    "Indexed LA Surface Area", "Indexed LA Volume",
+    
+    # cardiaque5
+    "Mitral E Wave Velocity", "Mitral A Wave Velocity", "Mitral E/A Ratio",
+    "Mitral Deceleration Time (ms)", "Lateral E' Velocity", "E/E' Ratio",
+    
+    # cardiaque6
+    "RV End-Diastolic Diameter (mm)", "RV End-Systolic Diameter (mm)",
+    "Indexed RV End-Diastolic Diameter", "Indexed RV End-Systolic Diameter",
+    "RV Fractional Shortening", "RV Strain (%)", "TAPSE (mm)",
+    
+    # cardiaque7
+    "RA Surface Area (cm²)", "RA Volume (mL)", "Indexed RA Surface Area", "Indexed RA Volume",
+    
+    # cardiaque8
+    "Tricuspid E Wave Velocity", "Tricuspid A Wave Velocity", "Tricuspid E/A Ratio",
+    "Tricuspid Deceleration Time (ms)", "Tricuspid S Wave Velocity",
+    
+    # cardiaque9
+    "Systolic Pulmonary Artery Pressure (mmHg)", "Mean Pulmonary Artery Pressure (mmHg)",
+    "TR Jet Velocity (m/s)", "Pulmonary VTI", "Pulmonary Acceleration Time (ms)"
+  )
+)
+
+
+# Vos variables binaires
+binary_vars <- c(
+  "Anemie_OMS2024"
+  , "Anemie_OMS2011", "Anemie_OMS2024_FER", "Anemie_OMS2011_FER"
+)
+
+# Long format + libellés
+df_long <- df %>%
+  select(Age_categorie_binaire, Ville_eval, all_of(param_cols), all_of(binary_vars)) %>%
+  pivot_longer(cols = all_of(param_cols), names_to = "param_raw", values_to = "valeur") %>%
+  left_join(dict, by = "param_raw") %>%
+  select(-param_raw)
+
+# t-test robuste, avec formule construite dynamiquement
+ttest_for_binary <- function(data, bin_var) {
+  g <- data %>% filter(!is.na(valeur), !is.na(.data[[bin_var]]))
+  # Besoin de 2 modalités et au moins 1 obs par modalité
+  if (dplyr::n_distinct(g[[bin_var]]) != 2) {
+    return(tibble(variable_binaire = bin_var, p = NA_real_, n_total = nrow(g)))
+  }
+  # vérifier qu'on a au moins 1 obs par groupe
+  ng <- g %>% count(.data[[bin_var]], name = "n") %>% pull(n)
+  if (any(ng == 0)) {
+    return(tibble(variable_binaire = bin_var, p = NA_real_, n_total = nrow(g)))
+  }
+  pval <- tryCatch(
+    {
+      fml <- reformulate(termlabels = bin_var, response = "valeur")
+      t.test(fml, data = g)$p.value
+    },
+    error = function(e) NA_real_
+  )
+  tibble(variable_binaire = bin_var, p = pval, n_total = nrow(g))
+}
+
+# Calcul p-values pour (Âge × Ville × Paramètre × Var binaire)
+res <- df_long %>%
+  group_by(Age_categorie_binaire, Ville_eval, parametre) %>%
+  group_modify(function(data_group, key) {
+    map_dfr(binary_vars, function(bin) ttest_for_binary(data_group, bin))
+  }) %>%
+  ungroup() %>%
+  mutate(Significativite = case_when(
+    !is.na(p) & p < 0.001 ~ "***",
+    !is.na(p) & p < 0.01  ~ "**",
+    !is.na(p) & p < 0.05  ~ "*",
+    is.na(p)              ~ NA_character_,
+    TRUE                  ~ "ns"
+  ))
+
+# Table finale
+table_signif <- res %>%
+  transmute(
+    Age      = Age_categorie_binaire,
+    Ville    = Ville_eval,
+    Parametre = parametre,
+    Variable_binaire = variable_binaire,
+    Significativite
+  ) %>%
+  filter(Significativite %in% c("*", "**", "***")) %>%
+  arrange(Age, Ville, Parametre, Variable_binaire)
+
+# Charger ta table filtrée
+tab_flex <- flextable(table_signif)
+
+# Nouveau document PowerPoint
+doc <- read_pptx()
+
+# Ajouter une diapo avec titre + contenu
+doc <- add_slide(doc, layout = "Title and Content", master = "Office Theme")
+
+# Ajouter un titre
+doc <- ph_with(doc, "Significant results", location = ph_location_type(type = "title"))
+
+# Ajouter le tableau
+doc <- ph_with(doc, tab_flex, location = ph_location_type(type = "body"))
+
+# Sauvegarde
+print(doc, target = "resultats_significatifs.pptx")
+```
+
+## Modèles linéaires simples Polyglobulie - variables
+```{r}
+# Polyglobulie nutrition
+df <- read.csv("data.csv")
+
+# Paramètres (déjà numériques)
+# Paramètres (déjà numériques)
+param_cols <- c(
+  # cardiaque1
+  "SC", "PAS", "PAD", "PAM", "FC", "DC", "IC", "TVR", "PAPm",
+  
+  # cardiaque2
+  "DTDVG", "DTSVG", "VTDVG", "DTDVGi", "DTSVGi", "VTDVGi", "PP", "RWT", "masseVG",
+  
+  # cardiaque3
+  "FEVG..teich.", "vol.ej..teich.", "FEVG.auto", "GLS.VG", "CCVG", "vol.éj..CCVG.", "h.r", "ITVSSAo", "DC",
+  
+  # cardiaque4
+  "diam.OG", "ao.og", "surf.OG", "vol.OG", "surf.OG.ind", "vol.OG.ind",
+  
+  # cardiaque5
+  "E.mit", "A.mit", "E.A.mit", "TDM.Emit", "E..lat", "E.e..mit",
+  
+  # cardiaque6
+  "STDVD", "STSVD", "STDVDi", "STSVDi", "FR.VD", "strain.VD", "TAPSE",
+  
+  # cardiaque7
+  "surf.OD", "vol.OD", "surf.OD.ind", "vol.OD.ind",
+  
+  # cardiaque8
+  "E.tric", "A.tric", "E.A.tric", "TDM.Etric", "onde.S.tric",
+  
+  # cardiaque9
+  "PAPs", "PAPm", "vitesse.IT", "ITV.pulm", "Tacc.pulm"
+)
+
+dict <- tibble::tibble(
+  param_raw = param_cols,
+  parametre = c(
+    # cardiaque1
+    "Body Surface Area (BSA)", "Systolic BP (mmHg)", "Diastolic BP (mmHg)", "Mean Arterial Pressure (mmHg)",
+    "Heart Rate (bpm)", "Cardiac Output (L/min)", "Cardiac Index (L/min/m²)",
+    "Systemic Vascular Resistance", "Mean Pulmonary Artery Pressure (mmHg)",
+    
+    # cardiaque2
+    "LV End-Diastolic Diameter (mm)", "LV End-Systolic Diameter (mm)", "LV End-Diastolic Volume (mL)",
+    "Indexed LV End-Diastolic Diameter", "Indexed LV End-Systolic Diameter", "Indexed LV End-Diastolic Volume",
+    "Posterior Wall Thickness (mm)", "Relative Wall Thickness", "LV Mass (g)",
+    
+    # cardiaque3
+    "LVEF (Teichholz)", "Stroke Volume (Teichholz)", "LVEF (Auto)", "LV Global Longitudinal Strain",
+    "LV Shortening Fraction", "Stroke Volume (Shortening Fraction)", "Heart Rate",
+    "LVOT VTI", "Cardiac Output (L/min)",
+    
+    # cardiaque4
+    "LA Diameter (mm)", "Ao/LA Ratio", "LA Surface Area (cm²)", "LA Volume (mL)",
+    "Indexed LA Surface Area", "Indexed LA Volume",
+    
+    # cardiaque5
+    "Mitral E Wave Velocity", "Mitral A Wave Velocity", "Mitral E/A Ratio",
+    "Mitral Deceleration Time (ms)", "Lateral E' Velocity", "E/E' Ratio",
+    
+    # cardiaque6
+    "RV End-Diastolic Diameter (mm)", "RV End-Systolic Diameter (mm)",
+    "Indexed RV End-Diastolic Diameter", "Indexed RV End-Systolic Diameter",
+    "RV Fractional Shortening", "RV Strain (%)", "TAPSE (mm)",
+    
+    # cardiaque7
+    "RA Surface Area (cm²)", "RA Volume (mL)", "Indexed RA Surface Area", "Indexed RA Volume",
+    
+    # cardiaque8
+    "Tricuspid E Wave Velocity", "Tricuspid A Wave Velocity", "Tricuspid E/A Ratio",
+    "Tricuspid Deceleration Time (ms)", "Tricuspid S Wave Velocity",
+    
+    # cardiaque9
+    "Systolic Pulmonary Artery Pressure (mmHg)", "Mean Pulmonary Artery Pressure (mmHg)",
+    "TR Jet Velocity (m/s)", "Pulmonary VTI", "Pulmonary Acceleration Time (ms)"
+  )
+)
+
+
+# Vos variables binaires
+binary_vars <- c(
+  "Polyglobulie_Hb14.5_OMS2024"
+  , "Polyglobulie_Hb14.5_OMS2011"
+)
+
+# Long format + libellés
+df_long <- df %>%
+  select(Age_categorie_binaire, Ville_eval, all_of(param_cols), all_of(binary_vars)) %>%
+  pivot_longer(cols = all_of(param_cols), names_to = "param_raw", values_to = "valeur") %>%
+  left_join(dict, by = "param_raw") %>%
+  select(-param_raw)
+
+# t-test robuste, avec formule construite dynamiquement
+ttest_for_binary <- function(data, bin_var) {
+  g <- data %>% filter(!is.na(valeur), !is.na(.data[[bin_var]]))
+  # Besoin de 2 modalités et au moins 1 obs par modalité
+  if (dplyr::n_distinct(g[[bin_var]]) != 2) {
+    return(tibble(variable_binaire = bin_var, p = NA_real_, n_total = nrow(g)))
+  }
+  # vérifier qu'on a au moins 1 obs par groupe
+  ng <- g %>% count(.data[[bin_var]], name = "n") %>% pull(n)
+  if (any(ng == 0)) {
+    return(tibble(variable_binaire = bin_var, p = NA_real_, n_total = nrow(g)))
+  }
+  pval <- tryCatch(
+    {
+      fml <- reformulate(termlabels = bin_var, response = "valeur")
+      t.test(fml, data = g)$p.value
+    },
+    error = function(e) NA_real_
+  )
+  tibble(variable_binaire = bin_var, p = pval, n_total = nrow(g))
+}
+
+# Calcul p-values pour (Âge × Ville × Paramètre × Var binaire)
+res <- df_long %>%
+  group_by(Age_categorie_binaire, Ville_eval, parametre) %>%
+  group_modify(function(data_group, key) {
+    map_dfr(binary_vars, function(bin) ttest_for_binary(data_group, bin))
+  }) %>%
+  ungroup() %>%
+  mutate(Significativite = case_when(
+    !is.na(p) & p < 0.001 ~ "***",
+    !is.na(p) & p < 0.01  ~ "**",
+    !is.na(p) & p < 0.05  ~ "*",
+    is.na(p)              ~ NA_character_,
+    TRUE                  ~ "ns"
+  ))
+
+# Table finale
+table_signif <- res %>%
+  transmute(
+    Age      = Age_categorie_binaire,
+    Ville    = Ville_eval,
+    Parametre = parametre,
+    Variable_binaire = variable_binaire,
+    Significativite
+  ) %>%
+  filter(Significativite %in% c("*", "**", "***")) %>%
+  arrange(Age, Ville, Parametre, Variable_binaire)
+
+# Charger ta table filtrée
+tab_flex <- flextable(table_signif)
+
+# Nouveau document PowerPoint
+doc <- read_pptx()
+
+# Ajouter une diapo avec titre + contenu
+doc <- add_slide(doc, layout = "Title and Content", master = "Office Theme")
+
+# Ajouter un titre
+doc <- ph_with(doc, "Significant results", location = ph_location_type(type = "title"))
+
+# Ajouter le tableau
+doc <- ph_with(doc, tab_flex, location = ph_location_type(type = "body"))
+
+# Sauvegarde
+print(doc, target = "resultats_significatifs.pptx")
+```
+
+## Modèles linéaires simples QUANTITATIF - variables
+```{r}
+vars_expliquees <- c("HB", "HCT..", "Hb.mass.kg..g...kg.", "ERFE..ng.mL.", "CRP..mg.L.", "FER..micromol.L.", "FERRITINE..microg.L.", "TRANSFERINE..g.L.", "RECEPTEUR.TRANSFERINE..mg.L.", "Body.iron", "Vit.B9", "Vit.B12")
+
+# Fonction pour lancer un modèle linéaire simple
+lm_for_var <- function(data, y_var, x_var) {
+  g <- data %>% filter(!is.na(.data[[y_var]]), !is.na(.data[[x_var]]))
+  
+  if (nrow(g) < 3) {
+    return(tibble(
+      Variable_expliquee = y_var,
+      Parametre = x_var,
+      Estimate = NA_real_,
+      Pvalue = NA_real_,
+      R2       = NA_real_,
+      N = nrow(g)
+    ))
+  }
+  
+  fml <- reformulate(termlabels = x_var, response = y_var)
+  mod <- tryCatch(lm(fml, data = g), error = function(e) NULL)
+  if (is.null(mod)) {
+    return(tibble(
+      Variable_expliquee = y_var,
+      Parametre = x_var,
+      Estimate = NA_real_,
+      Pvalue = NA_real_,
+      R2       = NA_real_,
+      N = nrow(g)
+    ))
+  }
+  
+  coefs <- summary(mod)$coefficients
+  tibble(
+    Variable_expliquee = y_var,
+    Parametre = x_var,
+    Estimate = round(coefs[x_var, "Estimate"],6),
+    Pvalue   = round(coefs[x_var, "Pr(>|t|)"],3),
+    R2       = round(summary(mod)$r.squared,3),
+    N        = nrow(g)
+  )
+}
+
+# Application
+res_lm <- map_dfr(vars_expliquees, function(y) {
+  map_dfr(param_cols, function(x) lm_for_var(df, y, x))
+})
+
+# Ajouter significativité
+res_lm <- res_lm %>%
+  mutate(Significativite = case_when(
+    !is.na(Pvalue) & Pvalue < 0.001 ~ "***",
+    !is.na(Pvalue) & Pvalue < 0.01  ~ "**",
+    !is.na(Pvalue) & Pvalue < 0.05  ~ "*",
+    is.na(Pvalue)                   ~ NA_character_,
+    TRUE                            ~ "ns"
+  ))
+
+# Table finale
+table_lm <- res_lm %>%
+  filter(Significativite %in% c("*", "**", "***")) %>%
+  arrange(Variable_expliquee, Parametre)
+
+# Export PowerPoint
+tab_flex <- flextable(table_lm)
+doc <- read_pptx()
+doc <- add_slide(doc, layout = "Title and Content", master = "Office Theme")
+doc <- ph_with(doc, "Linear models results", location = ph_location_type(type = "title"))
+doc <- ph_with(doc, tab_flex, location = ph_location_type(type = "body"))
+print(doc, target = "lm_resultats.pptx")
+```
+
+## Modèles linéaires simples QUALITATIF - variables
+```{r}
+vars_expliquees <- c(
+  # cardiaque1
+  "SC", "PAS", "PAD", "PAM", "FC", "DC", "IC", "TVR", "PAPm",
+  
+  # cardiaque2
+  "DTDVG", "DTSVG", "VTDVG", "DTDVGi", "DTSVGi", "VTDVGi", "PP", "RWT", "masseVG",
+  
+  # cardiaque3
+  "FEVG..teich.", "vol.ej..teich.", "FEVG.auto", "GLS.VG", "CCVG", "vol.éj..CCVG.", "h.r", "ITVSSAo", "DC",
+  
+  # cardiaque4
+  "diam.OG", "ao.og", "surf.OG", "vol.OG", "surf.OG.ind", "vol.OG.ind",
+  
+  # cardiaque5
+  "E.mit", "A.mit", "E.A.mit", "TDM.Emit", "E..lat", "E.e..mit",
+  
+  # cardiaque6
+  "STDVD", "STSVD", "STDVDi", "STSVDi", "FR.VD", "strain.VD", "TAPSE",
+  
+  # cardiaque7
+  "surf.OD", "vol.OD", "surf.OD.ind", "vol.OD.ind",
+  
+  # cardiaque8
+  "E.tric", "A.tric", "E.A.tric", "TDM.Etric", "onde.S.tric",
+  
+  # cardiaque9
+  "PAPs", "PAPm", "vitesse.IT", "ITV.pulm", "Tacc.pulm"
+)
+
+param_cols <- c("Anemie_OMS2011","Anemie_OMS2024", "Anemie_OMS2011_FER", "Anemie_OMS2024_FER", "Polyglobulie_Hb14.5_OMS2011", "Polyglobulie_Hb14.5_OMS2024")
+
+# Fonction pour lancer un modèle linéaire simple
+to_binary01 <- function(x) {
+  # si déjà logique
+  if (is.logical(x)) return(as.integer(x))
+  # si numérique avec seulement 0/1 (en ignorant NA)
+  if (is.numeric(x)) {
+    ux <- sort(unique(x[!is.na(x)]))
+    if (length(ux) <= 2 && all(ux %in% c(0,1))) return(as.numeric(x))
+  }
+  # si caractère : normaliser en minuscule sans espace
+  if (is.character(x)) {
+    xc <- trimws(tolower(x))
+    oui <- xc %in% c("oui","yes","true","vrai","1","y","o")
+    non <- xc %in% c("non","no","false","faux","0","n")
+    # si on couvre (quasi) tout en oui/non
+    if (all(oui | non | is.na(xc))) return(ifelse(oui, 1, ifelse(non, 0, NA_real_)))
+  }
+  # si facteur : à 2 niveaux → 0 pour le 1er niveau, 1 pour le 2e
+  if (is.factor(x)) {
+    lv <- levels(x)
+    if (length(lv) == 2) return(as.integer(x == lv[2]))
+  }
+  # autrement, renvoie NULL (non binaire)
+  NULL
+}
+
+lm_for_var <- function(data, y_var, x_var) {
+  if (!(y_var %in% names(data)) || !(x_var %in% names(data))) {
+    return(tibble::tibble(
+      Variable_expliquee = y_var, Parametre = x_var,
+      Estimate = NA_real_, Pvalue = NA_real_, R2 = NA_real_, R2_adj = NA_real_, N = 0
+    ))
+  }
+
+  y <- data[[y_var]]
+  x <- data[[x_var]]
+
+  # Tenter conversion binaire 0/1 si le prédicteur n'est pas numérique utilisable
+  x01 <- to_binary01(x)
+  if (!is.null(x01)) {
+    x <- x01
+  } else if (!is.numeric(x)) {
+    # prédicteur catégoriel à >2 niveaux : on ne fait pas de lm simple (1 seul coef)
+    return(tibble::tibble(
+      Variable_expliquee = y_var, Parametre = x_var,
+      Estimate = NA_real_, Pvalue = NA_real_, R2 = NA_real_, R2_adj = NA_real_,
+      N = sum(stats::complete.cases(y, x))
+    ))
+  }
+
+  # lignes complètes
+  ok <- stats::complete.cases(y, x)
+  y <- y[ok]; x <- x[ok]
+
+  if (length(y) < 3) {
+    return(tibble::tibble(
+      Variable_expliquee = y_var, Parametre = x_var,
+      Estimate = NA_real_, Pvalue = NA_real_, R2 = NA_real_, R2_adj = NA_real_, N = length(y)
+    ))
+  }
+
+  # modèle simple y ~ x (x numérique ou 0/1)
+  mod <- tryCatch(stats::lm(y ~ x), error = function(e) NULL)
+  if (is.null(mod)) {
+    return(tibble::tibble(
+      Variable_expliquee = y_var, Parametre = x_var,
+      Estimate = NA_real_, Pvalue = NA_real_, R2 = NA_real_, R2_adj = NA_real_, N = length(y)
+    ))
+  }
+
+  sm <- summary(mod)
+  coefs <- sm$coefficients
+  # La ligne du prédicteur s'appelle toujours "x" dans ce montage
+  if (!"x" %in% rownames(coefs)) {
+    return(tibble::tibble(
+      Variable_expliquee = y_var, Parametre = x_var,
+      Estimate = NA_real_, Pvalue = NA_real_, R2 = sm$r.squared, R2_adj = sm$adj.r.squared, N = length(y)
+    ))
+  }
+
+  tibble::tibble(
+    Variable_expliquee = y_var,
+    Parametre = x_var,
+    Estimate = unname(round(coefs["x", "Estimate"], 6)),
+    Pvalue   = unname(round(coefs["x", "Pr(>|t|)"], 3)),
+    R2       = round(sm$r.squared, 3),
+    N        = length(y)
+  )
+}
+
+# Application
+res_lm <- map_dfr(vars_expliquees, function(y) {
+  map_dfr(param_cols, function(x) lm_for_var(df, y, x))
+})
+
+# Ajouter significativité
+res_lm <- res_lm %>%
+  mutate(Significativite = case_when(
+    !is.na(Pvalue) & Pvalue < 0.001 ~ "***",
+    !is.na(Pvalue) & Pvalue < 0.01  ~ "**",
+    !is.na(Pvalue) & Pvalue < 0.05  ~ "*",
+    is.na(Pvalue)                   ~ NA_character_,
+    TRUE                            ~ "ns"
+  ))
+
+# Table finale
+table_lm <- res_lm %>%
+  filter(Significativite %in% c("*", "**", "***")) %>%
+  arrange(Variable_expliquee, Parametre)
+
+# Export PowerPoint
+tab_flex <- flextable(table_lm)
+doc <- read_pptx()
+doc <- add_slide(doc, layout = "Title and Content", master = "Office Theme")
+doc <- ph_with(doc, "Linear models results", location = ph_location_type(type = "title"))
+doc <- ph_with(doc, tab_flex, location = ph_location_type(type = "body"))
+print(doc, target = "lm_resultats.pptx")
+```
+
+
+
+# Tableaux divers
+## Tableau variables différences entre villes
+```{r}
+data_all <- read.csv("data.csv")
+
+# --------- PARAMÈTRES ----------
+ages   <- c("0-3 ans", "8-12 ans")
+villes <- c("Lima (150m)", "Cusco (3400m)", "Juliaca (3800m)", "La Rinconada (5100m)")
+vars_num <- c(
+  # cardiaque1
+  "SC", "PAS", "PAD", "PAM", "FC", "DC", "IC", "TVR", "PAPm",
+  
+  # cardiaque2
+  "DTDVG", "DTSVG", "VTDVG", "DTDVGi", "DTSVGi", "VTDVGi", "PP", "RWT", "masseVG",
+  
+  # cardiaque3
+  "FEVG..teich.", "vol.ej..teich.", "FEVG.auto", "GLS.VG", "CCVG", "vol.éj..CCVG.", "h.r", "ITVSSAo", "DC",
+  
+  # cardiaque4
+  "diam.OG", "ao.og", "surf.OG", "vol.OG", "surf.OG.ind", "vol.OG.ind",
+  
+  # cardiaque5
+  "E.mit", "A.mit", "E.A.mit", "TDM.Emit", "E..lat", "E.e..mit",
+  
+  # cardiaque6
+  "STDVD", "STSVD", "STDVDi", "STSVDi", "FR.VD", "strain.VD", "TAPSE",
+  
+  # cardiaque7
+  "surf.OD", "vol.OD", "surf.OD.ind", "vol.OD.ind",
+  
+  # cardiaque8
+  "E.tric", "A.tric", "E.A.tric", "TDM.Etric", "onde.S.tric",
+  
+  # cardiaque9
+  "PAPs", "PAPm", "vitesse.IT", "ITV.pulm", "Tacc.pulm"
+)
+# --------------------------------
+
+data_all$Age_categorie_binaire <- factor(data_all$Age_categorie_binaire, levels = ages)
+data_all$Ville_eval <- factor(data_all$Ville_eval, levels = villes)
+
+# 1) Fonction pour créer un tableau avec en-tête à 2 lignes
+make_table_by_age <- function(age_selected) {
+  res_age <- data_all %>%
+    filter(Age_categorie_binaire == age_selected) %>%
+    select(Ville_eval, all_of(vars_num)) %>%
+    pivot_longer(cols = all_of(vars_num), names_to = "Variable", values_to = "Valeur") %>%
+    group_by(Variable, Ville_eval) %>%
+    summarise(
+      n = sum(!is.na(Valeur)),
+      mean = mean(Valeur, na.rm = TRUE),
+      sd   = sd(Valeur, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      MeanSD = ifelse(n > 0,
+                      sprintf("%.2f \u00B1 %.2f (n=%d)", mean, sd, n),
+                      "NA")
+    ) %>%
+    select(Variable, Ville_eval, MeanSD) %>%
+    pivot_wider(names_from = Ville_eval, values_from = MeanSD) %>%
+    mutate(across(-Variable, ~replace_na(.x, "")))
+
+  # 🔹 Tests statistiques par variable
+signif_res <- data_all %>%
+  filter(Age_categorie_binaire == age_selected) %>%
+  select(Ville_eval, all_of(vars_num)) %>%
+  pivot_longer(cols = all_of(vars_num), names_to = "Variable", values_to = "Valeur") %>%
+  group_by(Variable) %>%
+  group_modify(~{
+    df <- .x
+    # Exiger au moins 2 obs par ville pour éviter les erreurs
+    ok <- df %>% group_by(Ville_eval) %>% summarise(n = sum(!is.na(Valeur)), .groups="drop") %>% filter(n >= 2)
+    if (nrow(ok) < 2) return(tibble(comparison = NA_character_, sig = ""))
+    rstatix::pairwise_t_test(df, Valeur ~ Ville_eval, p.adjust.method = "BH", pool.sd = FALSE) %>%
+      mutate(
+        comparison = paste(group1, group2, sep = "-"),
+        sig = dplyr::case_when(
+          p.adj < 0.001 ~ "***",
+          p.adj < 0.01  ~ "**",
+          p.adj < 0.05  ~ "*",
+          TRUE ~ ""
+        )
+      ) %>%
+      select(comparison, sig)
+  }) %>%
+  ungroup() %>%
+  mutate(comparison = stringr::str_replace_all(comparison, c(
+    "Lima \\(150m\\)" = "L", "Cusco \\(3400m\\)" = "C",
+    "Juliaca \\(3800m\\)" = "J", "La Rinconada \\(5100m\\)" = "R"
+  ))) %>%
+  group_by(Variable) %>%
+  summarise(Comparaisons = paste0(comparison[sig != ""], collapse = "; "), .groups="drop") %>%
+  mutate(Comparaisons = ifelse(Comparaisons == "", "", paste0("Signif: ", Comparaisons)))
+
+  # 🔹 Fusion avec tableau descriptif
+  res_age <- left_join(res_age, signif_res, by = "Variable")
+
+  # Flextable
+  ft <- flextable(res_age)
+
+  ft <- add_header_row(
+    ft,
+    values = c("", rep(age_selected, length(villes)), ""),
+    colwidths = c(1, rep(1, length(villes)), 1)
+  )
+
+  header_labels <- setNames(c("Variable", villes, "Comparaisons significatives"), names(res_age))
+  ft <- set_header_labels(ft, .labels = header_labels)
+
+  ft <- merge_h(ft, part = "header")
+  ft <- align(ft, align = "center", part = "header")
+  ft <- bold(ft, part = "header")
+  ft <- autofit(ft)
+  ft <- fontsize(ft, size = 10, part = "all")
+  ft <- valign(ft, valign = "center", part = "all")
+
+  return(ft)
+}
+
+# 2) Générer les deux tableaux
+ft_0_3 <- make_table_by_age("0-3 ans")
+ft_8_12 <- make_table_by_age("8-12 ans")
+
+# 3) Export PowerPoint avec 2 slides
+ppt <- read_pptx()
+
+ppt <- add_slide(ppt, layout = "Title and Content", master = "Office Theme")
+ppt <- ph_with(ppt, value = ft_0_3, location = ph_location_type(type = "body"))
+
+ppt <- add_slide(ppt, layout = "Title and Content", master = "Office Theme")
+ppt <- ph_with(ppt, value = ft_8_12, location = ph_location_type(type = "body"))
+
+print(ppt, target = "tableau_par_age_separe.pptx")
+```
+
+## Tableau modalités variables qualitatives
+```{r}
+
+data_all <- read.csv("data.csv")
+# ATTENTION PASSER TOUTES LES VARIABLES SELECTIONNEES EN CHARACTER AVANT DE CONTINUER
+
+# --------- PARAMÈTRES ----------
+ages   <- c("0-3 ans", "8-12 ans")
+villes <- c("Lima (150m)", "Cusco (3400m)", "Juliaca (3800m)", "La Rinconada (5100m)")
+vars_quali <- c(
+  "Polyglobulie_Hb14.5_OMS2011",
+  "Polyglobulie_Hb14.5_OMS2024",
+  "Polyglobulie_Hb1SD",
+  "Polyglobulie_Hb2SD",
+  "Polyglobulie_1SD_Hbmass.g.kg",
+  "Polyglobulie_2SD_Hbmass.g.kg",
+  "Polyglobulie_HB1.5SD",
+  "Polyglobulie_1.5SD_Hbmass.kg"
+)
+# --------------------------------
+
+data_all$Age_categorie_binaire <- factor(data_all$Age_categorie_binaire, levels = ages)
+data_all$Ville_eval <- factor(data_all$Ville_eval, levels = villes)
+
+# Fonction pour créer le tableau avec modalités listées par cellule
+make_quali_table_compact <- function(age_selected) {
+  df <- data_all %>%
+    filter(Age_categorie_binaire == age_selected)
+
+  tab_list <- lapply(vars_quali, function(var) {
+    df %>%
+      group_by(Variable = var, Modalité = .data[[var]], Ville_eval) %>%
+      summarise(n = n(), .groups = "drop") %>%
+      mutate(txt = paste0(Modalité, " (n=", n, ")")) %>%
+      group_by(Variable, Ville_eval) %>%
+      summarise(txt_combined = paste(txt, collapse = "\n"), .groups = "drop") %>%
+      pivot_wider(names_from = Ville_eval, values_from = txt_combined)
+  })
+
+  tab_wide <- bind_rows(tab_list)
+
+  # Remplacer les NA par ""
+  tab_wide <- tab_wide %>%
+    mutate(across(all_of(villes), ~replace_na(.x, "")))
+
+  # Réordonner colonnes
+  tab_wide <- tab_wide %>%
+    select(Variable, all_of(villes))
+
+  # Flextable
+  ft <- flextable(tab_wide)
+
+  # Ajouter ligne d’en-tête supérieure (âge)
+  ft <- add_header_row(
+    ft,
+    values = c("", rep(age_selected, length(villes))),
+    colwidths = c(1, rep(1, length(villes)))
+  )
+
+  # Noms des villes sur ligne du bas
+  header_labels <- c("Variable" = "Variable")
+  header_labels[villes] <- villes
+  ft <- set_header_labels(ft, .labels = header_labels)
+
+  # Style
+  ft <- merge_h(ft, part = "header")
+  ft <- align(ft, align = "center", part = "header")
+  ft <- align(ft, align = "left", part = "body")
+  ft <- valign(ft, valign = "center", part = "all")
+  ft <- fontsize(ft, size = 10, part = "all")
+  ft <- bold(ft, part = "header")
+  ft <- autofit(ft)
+
+  return(ft)
+}
+
+# Générer les tableaux pour chaque tranche d’âge
+ft_quali_0_3 <- make_quali_table_compact("0-3 ans")
+ft_quali_8_12 <- make_quali_table_compact("8-12 ans")
+
+# Export PowerPoint
+ppt <- read_pptx()
+ppt <- add_slide(ppt, layout = "Title and Content", master = "Office Theme")
+ppt <- ph_with(ppt, value = ft_quali_0_3, location = ph_location_type(type = "body"))
+
+ppt <- add_slide(ppt, layout = "Title and Content", master = "Office Theme")
+ppt <- ph_with(ppt, value = ft_quali_8_12, location = ph_location_type(type = "body"))
+
+print(ppt, target = "tableau_quali_modalites_ligne_par_age.pptx")
+```
+```{r}
+# ---------- PARAMÈTRES ----------
+ages   <- c("0-3 ans", "8-12 ans")
+villes <- c("Lima (150m)", "Cusco (3400m)", "Juliaca (3800m)", "La Rinconada (5100m)")
+vars_quali <- c(
+  "CSP_M",        # âge exact en mois
+  "CSP_P",          # taille mesurée (cm)
+  "statut.poids",    # catégorie poids (OMS : maigreur, normal, surpoids…)
+  "statut.taille",   # catégorie taille (retard de croissance, normal…)
+  "poids.mini.kg",   # poids min observé
+  "poids.max.kg",    # poids max observé
+  "Taille.mini.cm",  # taille min observée
+  "Taille.max.cm"    # taille max observée
+)
+
+# ---------- Données ----------
+data_all <- read.csv("data.csv")
+data_all$Age_categorie_binaire <- factor(data_all$Age_categorie_binaire, levels = ages)
+data_all$Ville_eval <- factor(data_all$Ville_eval, levels = villes)
+
+# ---------- Fonction tableau qualitatif + tests pairwise ----------
+make_quali_table_compact <- function(age_selected) {
+
+  # Sous-ensemble d'âge + forcer les qualitatives en character
+  df <- data_all %>%
+    filter(Age_categorie_binaire == age_selected) %>%
+    mutate(across(all_of(vars_quali), ~ as.character(.x)))
+
+  # ----- Tableau descriptif (modalités listées par ville) -----
+  tab_list <- lapply(vars_quali, function(var) {
+    df %>%
+      group_by(Variable = var, Modalité = .data[[var]], Ville_eval) %>%
+      summarise(n = n(), .groups = "drop") %>%
+      mutate(txt = paste0(Modalité, " (n=", n, ")")) %>%
+      group_by(Variable, Ville_eval) %>%
+      summarise(txt_combined = paste(txt, collapse = "\n"), .groups = "drop") %>%
+      tidyr::pivot_wider(names_from = Ville_eval, values_from = txt_combined)
+  })
+  tab_wide <- bind_rows(tab_list) %>%
+    mutate(across(all_of(villes), ~ tidyr::replace_na(.x, ""))) %>%
+    select(Variable, all_of(villes))
+
+  # ----- Tests pairwise (ville à ville) par variable -----
+  abbrev <- c(
+    "Lima (150m)"         = "L",
+    "Cusco (3400m)"       = "C",
+    "Juliaca (3800m)"     = "J",
+    "La Rinconada (5100m)"= "R"
+  )
+
+  tests_df <- purrr::map_dfr(vars_quali, function(var) {
+    d <- df %>%
+      select(Ville_eval, val = all_of(var)) %>%
+      filter(!is.na(val)) %>%
+      mutate(val = as.factor(val)) %>%
+      droplevels()
+
+    # Villes présentes avec données
+    villes_pres <- d %>% count(Ville_eval, name = "n") %>%
+      filter(n > 0) %>% pull(Ville_eval) %>% as.character()
+
+    if (length(villes_pres) < 2) {
+      return(tibble(Variable = var, pair = NA_character_, p_adj = NA_real_, sig = ""))
+    }
+
+    pairs <- utils::combn(villes_pres, 2, simplify = FALSE)
+
+    # p-values par paire
+    pvals <- map_dbl(pairs, function(pr) {
+      d2 <- d %>% filter(Ville_eval %in% pr) %>% droplevels()
+      tbl2 <- table(d2$val, d2$Ville_eval)
+
+      # Si tableau dégénéré (1 seule modalité observée, ou colonne vide), on renvoie NA
+      if (nrow(tbl2) < 2 || any(colSums(tbl2) == 0)) return(NA_real_)
+
+      if (any(tbl2 < 5)) {
+        suppressWarnings(stats::fisher.test(tbl2, simulate.p.value = T)$p.value)
+      } else {
+        suppressWarnings(stats::chisq.test(tbl2, correct = FALSE)$p.value)
+      }
+    })
+
+    padj <- p.adjust(pvals, method = "holm")
+
+    tibble(
+      Variable = var,
+      pair = map_chr(pairs, ~ paste(abbrev[.x], collapse = "-")),
+      p_adj = padj,
+      sig = dplyr::case_when(
+        is.na(padj) ~ "",
+        padj < 0.001 ~ "***",
+        padj < 0.01  ~ "**",
+        padj < 0.05  ~ "*",
+        TRUE ~ ""
+      )
+    )
+  })
+
+  compar <- tests_df %>%
+    group_by(Variable) %>%
+    summarise(
+      `Comparaisons significatives` = {
+        idx <- which(sig != "")
+        if (length(idx) == 0) "" else paste0(paste0(pair[idx], " ", sig[idx]), collapse = "; ")
+      },
+      .groups = "drop"
+    ) %>%
+    mutate(
+      `Comparaisons significatives` = ifelse(
+        `Comparaisons significatives` == "", "",
+        paste0("Signif: ", `Comparaisons significatives`)
+      )
+    )
+
+  tab_final <- left_join(tab_wide, compar, by = "Variable")
+
+  # ----- Flextable -----
+  ft <- flextable(tab_final)
+
+  ft <- add_header_row(
+    ft,
+    values = c("", rep(age_selected, length(villes)), "Comparaisons"),
+    colwidths = c(1, rep(1, length(villes)), 1)
+  )
+
+  header_labels <- c("Variable" = "Variable")
+  header_labels[villes] <- villes
+  header_labels["Comparaisons significatives"] <- "Comparaisons significatives"
+  ft <- set_header_labels(ft, .labels = header_labels)
+
+  ft <- merge_h(ft, part = "header")
+  ft <- align(ft, align = "center", part = "header")
+  ft <- align(ft, align = "left", part = "body")
+  ft <- valign(ft, valign = "center", part = "all")
+  ft <- fontsize(ft, size = 10, part = "all")
+  ft <- bold(ft, part = "header")
+  ft <- autofit(ft)
+
+  return(ft)
+}
+
+# ---------- Génération & export ----------
+ft_quali_0_3 <- make_quali_table_compact("0-3 ans")
+ft_quali_8_12 <- make_quali_table_compact("8-12 ans")
+
+ppt <- read_pptx()
+ppt <- add_slide(ppt, layout = "Title and Content", master = "Office Theme")
+ppt <- ph_with(ppt, value = ft_quali_0_3, location = ph_location_type(type = "body"))
+
+ppt <- add_slide(ppt, layout = "Title and Content", master = "Office Theme")
+ppt <- ph_with(ppt, value = ft_quali_8_12, location = ph_location_type(type = "body"))
+
+print(ppt, target = "tableau_quali_modalites_ligne_par_age_avec_signif.pptx")
+```
+```{r}
+vars_anemie <- c(
+  "Anemie_OMS2011",
+  "Anemie_OMS2024",
+  "Anemie_SD",
+  "Anemie_2SD",
+  "Anemie_SD_Hbmass_kg",
+  "Anemie_2SD_Hbmass_kg",
+  "Anemie_1.5SD",
+  "Anemie_1.5SD_Hbmass_kg",
+  "Anemie_OMS2024_FER",
+  "Anemie_OMS2011_FER"
+)
+vars_polyglobulie <- c(
+  "Polyglobulie_Hb14.5_OMS2011",
+  "Polyglobulie_Hb14.5_OMS2024",
+  "Polyglobulie_HbSD",
+  "Polyglobulie_Hb2SD",
+  "Polyglobulie_HbSD_Hbmass_kg",
+  "Polyglobulie_Hb2SD_Hbmass_kg",
+  "Polyglobulie_Hb1.5SD",
+  "Polyglobulie_Hb1.5SD_Hbmass_kg"
+)
+vars_anthropo <- c(
+  "Age_mois",        # âge exact en mois
+  "Taille",          # taille mesurée (cm)
+  "Poids",           # poids mesuré (kg)
+  "BMI",             # indice de masse corporelle (variante du nom)
+  "IMC",             # indice de masse corporelle (doublon dans ton fichier)
+  "statut.poids",    # catégorie poids (OMS : maigreur, normal, surpoids…)
+  "statut.taille",   # catégorie taille (retard de croissance, normal…)
+  "poids.mini.kg",   # poids min observé
+  "poids.max.kg",    # poids max observé
+  "Taille.mini.cm",  # taille min observée
+  "Taille.max.cm"    # taille max observée
+)
+```
