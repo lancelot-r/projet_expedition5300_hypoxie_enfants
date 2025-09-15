@@ -1,19 +1,22 @@
 # Projet Expedition 5300 - Analyses R
 
-Ce dossier contient l'ensemble du code que j'ai développé dans le cadre du projet Expedition 5300 enfants.  
-Il est organisé en plusieurs fichiers R Markdown correspondant aux étapes principales du travail.
+Ce dossier contient l'ensemble du code que j'ai développé dans le cadre du projet Expedition 5300 enfants ainsi que les figures et tableaux générés.  
+Mon code est organisé en plusieurs fichiers R Markdown correspondant aux étapes principales du travail.
 
 ---
 
 ## Contenu des fichiers
 
-- **01_stats_generales.Rmd**  
+- **01_final_report_internship.pptx**
+  Ce fichier Powerpoint contient toutes les figures générées ainsi que l'explication des analyses effectuées sur les données.
+  
+- **/02_R_scripts/01_stats_generales.Rmd**  
   Analyses et visualisations des données suivant des questions posées préalablement avec catégories visibles dans le fichier.
 
-- **02_boxplots_barplots.Rmd**  
+- **/02_R_scripts/02_boxplots_barplots.Rmd**  
   Generation de boxplots et barplots pour visualiser les distributions et comparaisons entre villes pour chaque variable numérique (boxplots) et chaque variable catégorielle (barplots).
 
-- **03_tableaux_variables.Rmd**  
+- **/02_R_scripts/03_tableaux_variables.Rmd**  
   Analyses statistiques principales (tableaux desctiptifs, modèles linéaires siples, comparaisons entre groupes).
 
 ---
