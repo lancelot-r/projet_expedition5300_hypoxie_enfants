@@ -1,5 +1,8 @@
-.gitignore
 .Rhistory
 .DS_Store
 02_R_scripts/data.csv
 02_R_scripts/data.xlsx
+02_R_scripts/.Rhistory
+02_R_scripts/.DS_Store
+02_R_scripts/draft_R_scripts/.Rhistory
+02_R_scripts/draft_R_scripts/.DS_Store
